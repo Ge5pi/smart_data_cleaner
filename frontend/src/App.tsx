@@ -27,67 +27,91 @@ const App = () => {
     formData.append("file", file);
 
     try {
-      // Получаем превью
-      const previewResponse = await axios.post("http://localhost:5643/upload/", formData);
-      setPreview(previewResponse.data.preview);
+      const previewRes = await axios.post("http://localhost:5643/upload/", formData);
+      setPreview(previewRes.data.preview);
 
-      // Получаем анализ
-      const analysisResponse = await axios.post("http://localhost:5643/analyze/", formData);
-      setColumns(analysisResponse.data.columns);
+      const analysisRes = await axios.post("http://localhost:5643/analyze/", formData);
+      setColumns(analysisRes.data.columns);
     } catch (error) {
       console.error("Ошибка при загрузке файла", error);
     }
   };
 
   return (
-    <div style={{ padding: "2rem" }}>
-      <h1>Smart Data Cleaner</h1>
+    <div className="min-h-screen bg-gray-50 px-8 py-6 font-sans">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <h1 className="text-3xl font-bold text-gray-800">Smart Data Cleaner</h1>
 
-      <input type="file" accept=".csv" onChange={handleFileChange} />
-      <button onClick={handleUpload}>Загрузить</button>
+        <div className="flex items-center gap-4">
+          <input type="file" accept=".csv" onChange={handleFileChange} />
+          <button
+            onClick={handleUpload}
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
+          >
+            Загрузить CSV
+          </button>
+        </div>
 
-      <h2>Анализ колонок</h2>
-      <table border={1} cellPadding={5}>
-        <thead>
-          <tr>
-            <th>Название</th>
-            <th>Тип</th>
-            <th>Nulls</th>
-            <th>Уникальные</th>
-            <th>Примеры</th>
-          </tr>
-        </thead>
-        <tbody>
-          {columns.map((col, idx) => (
-            <tr key={idx}>
-              <td>{col.column}</td>
-              <td>{col.dtype}</td>
-              <td>{col.nulls}</td>
-              <td>{col.unique}</td>
-              <td>{col.sample_values.join(", ")}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        {columns.length > 0 && (
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Анализ колонок</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm text-left border border-gray-200">
+                <thead className="bg-gray-100 text-gray-700">
+                  <tr>
+                    <th className="px-4 py-2 border">Колонка</th>
+                    <th className="px-4 py-2 border">Тип</th>
+                    <th className="px-4 py-2 border">Nulls</th>
+                    <th className="px-4 py-2 border">Уникальные</th>
+                    <th className="px-4 py-2 border">Примеры</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {columns.map((col, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-4 py-2 border">{col.column}</td>
+                      <td className="px-4 py-2 border">{col.dtype}</td>
+                      <td className="px-4 py-2 border">{col.nulls}</td>
+                      <td className="px-4 py-2 border">{col.unique}</td>
+                      <td className="px-4 py-2 border">{col.sample_values.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-      <h2>Превью данных</h2>
-      <table border={1} cellPadding={5}>
-        <thead>
-          <tr>
-            {preview.length > 0 &&
-              Object.keys(preview[0]).map((key, idx) => <th key={idx}>{key}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {preview.map((row, idx) => (
-            <tr key={idx}>
-              {Object.values(row).map((value, i) => (
-                <td key={i}>{value}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        {preview.length > 0 && (
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Превью данных</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm text-left border border-gray-200">
+                <thead className="bg-gray-100 text-gray-700">
+                  <tr>
+                    {Object.keys(preview[0]).map((key, idx) => (
+                      <th key={idx} className="px-4 py-2 border">
+                        {key}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((row, idx) => (
+                    <tr key={idx} className="border-t">
+                      {Object.values(row).map((val, i) => (
+                        <td key={i} className="px-4 py-2 border">
+                          {String(val)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

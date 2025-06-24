@@ -2,9 +2,13 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # C extensions
 *.so
+
+frontend/node_modules/
+backend/.venv/
 
 # Distribution / packaging
 .Python

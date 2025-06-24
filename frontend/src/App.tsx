@@ -1,53 +1,95 @@
-import { useState } from 'react'
-import axios from 'axios'
+import React, { useState } from "react";
+import axios from "axios";
 
-function App() {
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<Record<string, any>[]>([])
+type ColumnAnalysis = {
+  column: string;
+  dtype: string;
+  nulls: number;
+  unique: number;
+  sample_values: string[];
+};
+
+const App = () => {
+  const [preview, setPreview] = useState<any[]>([]);
+  const [columns, setColumns] = useState<ColumnAnalysis[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) {
+      setFile(e.target.files[0]);
+    }
+  };
 
   const handleUpload = async () => {
-    if (!file) return
-    const formData = new FormData()
-    formData.append("file", file)
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
 
     try {
-      const res = await axios.post("http://localhost:5643/upload/", formData)
-      setPreview(res.data.preview)
-    } catch (err) {
-      console.error("Ошибка при загрузке файла", err)
+      // Получаем превью
+      const previewResponse = await axios.post("http://localhost:5643/upload/", formData);
+      setPreview(previewResponse.data.preview);
+
+      // Получаем анализ
+      const analysisResponse = await axios.post("http://localhost:5643/analyze/", formData);
+      setColumns(analysisResponse.data.columns);
+    } catch (error) {
+      console.error("Ошибка при загрузке файла", error);
     }
-  }
+  };
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-4">Smart Data Cleaner</h1>
-      <input type="file" accept=".csv" onChange={e => setFile(e.target.files?.[0] || null)} />
-      <button onClick={handleUpload} className="ml-2 px-4 py-1 bg-blue-500 text-white">
-        Загрузить
-      </button>
+    <div style={{ padding: "2rem" }}>
+      <h1>Smart Data Cleaner</h1>
 
-      {preview.length > 0 && (
-        <table className="mt-6 border">
-          <thead>
-            <tr>
-              {Object.keys(preview[0]).map((col) => (
-                <th key={col} className="border px-2">{col}</th>
+      <input type="file" accept=".csv" onChange={handleFileChange} />
+      <button onClick={handleUpload}>Загрузить</button>
+
+      <h2>Анализ колонок</h2>
+      <table border={1} cellPadding={5}>
+        <thead>
+          <tr>
+            <th>Название</th>
+            <th>Тип</th>
+            <th>Nulls</th>
+            <th>Уникальные</th>
+            <th>Примеры</th>
+          </tr>
+        </thead>
+        <tbody>
+          {columns.map((col, idx) => (
+            <tr key={idx}>
+              <td>{col.column}</td>
+              <td>{col.dtype}</td>
+              <td>{col.nulls}</td>
+              <td>{col.unique}</td>
+              <td>{col.sample_values.join(", ")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Превью данных</h2>
+      <table border={1} cellPadding={5}>
+        <thead>
+          <tr>
+            {preview.length > 0 &&
+              Object.keys(preview[0]).map((key, idx) => <th key={idx}>{key}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {preview.map((row, idx) => (
+            <tr key={idx}>
+              {Object.values(row).map((value, i) => (
+                <td key={i}>{value}</td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {preview.map((row, i) => (
-              <tr key={i}>
-                {Object.values(row).map((val, j) => (
-                  <td key={j} className="border px-2">{val}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+          ))}
+        </tbody>
+      </table>
     </div>
-  )
-}
+  );
+};
 
-export default App
+export default App;

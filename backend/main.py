@@ -29,3 +29,22 @@ async def upload_csv(file: UploadFile = File(...)):
     preview_data = df.head(5).to_dict(orient="records")
 
     return {"preview": preview_data}
+
+@app.post("/analyze/")
+async def analyze_csv(file: UploadFile = File(...)):
+    df = pd.read_csv(file.file, encoding="utf-8")
+    df = df.replace([np.inf, -np.inf], np.nan).where(pd.notnull(df), None)
+
+    # Анализ по колонкам
+    analysis = []
+    for col in df.columns:
+        col_data = df[col]
+        analysis.append({
+            "column": col,
+            "dtype": str(col_data.dtype),
+            "nulls": int(col_data.isna().sum()),
+            "unique": int(col_data.nunique()),
+            "sample_values": col_data.dropna().astype(str).unique()[:3].tolist()
+        })
+
+    return {"columns": analysis}

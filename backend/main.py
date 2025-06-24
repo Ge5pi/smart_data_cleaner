@@ -1,7 +1,8 @@
 import ast
+from typing import Optional
 
 import openai
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -65,12 +66,17 @@ async def analyze_csv(file: UploadFile = File(...)):
 
 
 @app.post("/outliers/")
-async def detect_outliers(file: UploadFile = File(...)):
+async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
     df = pd.read_csv(file.file, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
 
     # Оставляем только числовые колонки
-    numeric_df = df.select_dtypes(include=[np.number])
+    if columns:
+        import json
+        selected_columns = json.loads(columns)
+        numeric_df = df[selected_columns].select_dtypes(include=[np.number])
+    else:
+        numeric_df = df.select_dtypes(include=[np.number])
 
     if numeric_df.shape[1] == 0:
         return {"error": "Нет числовых данных для анализа выбросов."}

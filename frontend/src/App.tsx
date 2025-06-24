@@ -10,6 +10,8 @@ type ColumnAnalysis = {
 };
 
 const App = () => {
+  const [outliers, setOutliers] = useState<any[]>([]);
+  const [outlierCount, setOutlierCount] = useState<number | null>(null);
   const [preview, setPreview] = useState<any[]>([]);
   const [columns, setColumns] = useState<ColumnAnalysis[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -37,6 +39,21 @@ const App = () => {
     }
   };
 
+  const handleDetectOutliers = async () => {
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await axios.post("http://localhost:5643/outliers/", formData);
+      setOutliers(res.data.outlier_preview);
+      setOutlierCount(res.data.outlier_count);
+    } catch (error) {
+      console.error("Ошибка при определении выбросов", error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 px-8 py-6 font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -50,6 +67,13 @@ const App = () => {
           >
             Загрузить CSV
           </button>
+          <button
+            onClick={handleDetectOutliers}
+                className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition"
+            >
+            Найти выбросы
+          </button>
+
         </div>
 
         {columns.length > 0 && (
@@ -111,6 +135,40 @@ const App = () => {
             </div>
           </div>
         )}
+        {outlierCount !== null && (
+  <div className="bg-white shadow rounded-lg p-6">
+    <h2 className="text-xl font-semibold mb-4 text-red-700">
+      Обнаружено выбросов: {outlierCount}
+    </h2>
+    {outliers.length > 0 && (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm text-left border border-gray-200">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              {Object.keys(outliers[0]).map((key, idx) => (
+                <th key={idx} className="px-4 py-2 border">
+                  {key}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {outliers.map((row, idx) => (
+              <tr key={idx} className="border-t">
+                {Object.values(row).map((val, i) => (
+                  <td key={i} className="px-4 py-2 border">
+                    {String(val)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+)}
+
       </div>
     </div>
   );

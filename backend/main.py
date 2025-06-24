@@ -1,6 +1,5 @@
 import ast
 from typing import Optional
-
 import openai
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,36 +9,122 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import json
 import os
-
 from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import LabelEncoder
+from tabpfn import TabPFNClassifier, TabPFNRegressor
 
 load_dotenv(dotenv_path="D:\\smart_data_cleaner\\backend\\.env", override=True)
 api_key = os.getenv("OPENAI_API_KEY")
-print(api_key)
 client = OpenAI(api_key=api_key)
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Уточни позже под фронт
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
+    df_work = df.copy()
+
+    if not df_work[target_column].isna().any():
+        return df_work[target_column]
+
+    mask_missing = df_work[target_column].isna()
+    df_complete = df_work[~mask_missing]
+    df_missing = df_work[mask_missing]
+
+    if len(df_complete) == 0:
+        return df_work[target_column]
+
+    if len(df_complete) > max_samples:
+        df_complete = df_complete.sample(n=max_samples, random_state=42)
+
+    feature_columns = [col for col in df_work.columns if col != target_column]
+    useful_features = []
+    label_encoders = {}
+
+    for col in feature_columns:
+        if df_complete[col].isna().sum() / len(df_complete) > 0.5:
+            continue
+
+        if df_complete[col].nunique() > 100:
+            continue
+
+        useful_features.append(col)
+
+    if len(useful_features) == 0:
+        return df_work[target_column]
+
+    X_train = df_complete[useful_features].copy()
+    y_train = df_complete[target_column].copy()
+    X_predict = df_missing[useful_features].copy()
+
+    for col in useful_features:
+        if X_train[col].dtype == 'object':
+            le = LabelEncoder()
+
+            X_train[col] = X_train[col].fillna('missing')
+            X_predict[col] = X_predict[col].fillna('missing')
+
+            all_values = list(set(X_train[col].tolist() + X_predict[col].tolist()))
+            le.fit(all_values)
+
+            X_train[col] = le.transform(X_train[col])
+            X_predict[col] = le.transform(X_predict[col])
+
+            label_encoders[col] = le
+
+    for col in useful_features:
+        if X_train[col].dtype in ['int64', 'float64']:
+            median_val = X_train[col].median()
+            X_train[col] = X_train[col].fillna(median_val)
+            X_predict[col] = X_predict[col].fillna(median_val)
+
+    try:
+        if y_train.dtype == 'object' or y_train.nunique() < 20:
+            le_target = LabelEncoder()
+            y_train_encoded = le_target.fit_transform(y_train.astype(str))
+
+            model = TabPFNClassifier(device='cpu')
+            model.fit(X_train.values, y_train_encoded)
+
+            predictions_encoded = model.predict(X_predict.values)
+            predictions = le_target.inverse_transform(predictions_encoded)
+
+            if y_train.dtype != 'object':
+                predictions = pd.Series(predictions).astype(y_train.dtype).values
+
+        else:
+            model = TabPFNRegressor(device='cpu')
+            model.fit(X_train.values, y_train.values)
+
+            predictions = model.predict(X_predict.values)
+
+            predictions = pd.Series(predictions).astype(y_train.dtype).values
+
+        result = df_work[target_column].copy()
+        result.loc[mask_missing] = predictions
+
+        return result
+
+    except Exception as e:
+        print(f"Ошибка при использовании TabPFN для столбца {target_column}: {e}")
+        return df_work[target_column]
+
+
 @app.post("/upload/")
 async def upload_csv(file: UploadFile = File(...)):
     df = pd.read_csv(file.file, encoding="utf-8")
 
-    # Убираем inf, -inf, NaN
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.where(pd.notnull(df), None)
 
-    # Приводим всё к строкам (временно, для MVP)
     df = df.astype(str)
 
-    # Выдаём первые 5 строк
     preview_data = df.head(5).to_dict(orient="records")
 
     return {"preview": preview_data}
@@ -50,7 +135,6 @@ async def analyze_csv(file: UploadFile = File(...)):
     df = pd.read_csv(file.file, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan).where(pd.notnull(df), None)
 
-    # Анализ по колонкам
     analysis = []
     for col in df.columns:
         col_data = df[col]
@@ -65,12 +149,65 @@ async def analyze_csv(file: UploadFile = File(...)):
     return {"columns": analysis}
 
 
+@app.post("/impute-missing/")
+async def impute_missing_values(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
+    df = pd.read_csv(file.file, encoding="utf-8")
+    df = df.replace([np.inf, -np.inf], np.nan)
+
+    if columns:
+        selected_columns = json.loads(columns)
+    else:
+        selected_columns = [col for col in df.columns if df[col].isna().any()]
+
+    if not selected_columns:
+        return {"error": "Нет столбцов с пропущенными значениями для обработки."}
+
+    missing_before = {}
+    for col in selected_columns:
+        missing_before[col] = int(df[col].isna().sum())
+
+    df_imputed = df.copy()
+    processing_results = {}
+
+    for col in selected_columns:
+        if df[col].isna().any():
+            try:
+                print(f"Обрабатываем столбец: {col}")
+                df_imputed[col] = impute_missing_values_with_tabpfn(df, col)
+                # Clean the imputed column to ensure no inf/-inf values remain
+                df_imputed[col] = df_imputed[col].replace([np.inf, -np.inf], np.nan)
+                processing_results[col] = "success"
+            except Exception as e:
+                print(f"Ошибка при обработке столбца {col}: {e}")
+                processing_results[col] = f"error: {str(e)}"
+
+    missing_after = {}
+    for col in selected_columns:
+        missing_after[col] = int(df_imputed[col].isna().sum())
+
+    # Clean the entire dataframe before creating preview
+    df_imputed = df_imputed.replace([np.inf, -np.inf], np.nan)
+
+    # Convert the preview data and handle NaN values for JSON serialization
+    preview_data = df_imputed.head(10).fillna("null").to_dict(orient="records")
+
+    # Alternative approach: replace NaN with None for JSON compatibility
+    # preview_data = df_imputed.head(10).where(pd.notnull(df_imputed.head(10)), None).to_dict(orient="records")
+
+    return {
+        "preview": preview_data,
+        "missing_before": missing_before,
+        "missing_after": missing_after,
+        "processing_results": processing_results,
+        "total_rows": len(df_imputed)
+    }
+
+
 @app.post("/outliers/")
 async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
     df = pd.read_csv(file.file, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
 
-    # Оставляем только числовые колонки
     if columns:
         import json
         selected_columns = json.loads(columns)
@@ -98,17 +235,13 @@ async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] =
     )
     print(response.output_text)
 
-    # Модель Isolation Forest
     model = IsolationForest(n_estimators=100, max_samples=5000, contamination=0.05, n_jobs=-1, random_state=42)
     model.fit(numeric_df[eval(response.output_text)])
 
-    # Предсказания: -1 = выброс, 1 = норм
     df["outlier"] = model.predict(numeric_df[ast.literal_eval(response.output_text)])
 
-    # Выбрасываем нормальные строки, оставляем только выбросы
     outliers = df[df["outlier"] == -1].drop(columns=["outlier"])
 
-    # Ограничим количество выбросов, чтобы не перегружать фронт
     outlier_preview = outliers.head(5).to_dict(orient="records")
 
     return {

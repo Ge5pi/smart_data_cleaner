@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter } from "lucide-react"; // Importing icons from lucide-react
+import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp } from "lucide-react";
 import axios from "axios";
+
 type ColumnAnalysis = {
   column: string;
   dtype: string;
@@ -9,16 +10,27 @@ type ColumnAnalysis = {
   sample_values: string[];
 };
 
+type ImputationResult = {
+  preview: any[];
+  missing_before: { [key: string]: number };
+  missing_after: { [key: string]: number };
+  processing_results: { [key: string]: string };
+  total_rows: number;
+};
+
 const App = () => {
   // State variables for the application
-  const [outliers, setOutliers] = useState<any[]>([]); // Stores detected outlier rows
-  const [outlierCount, setOutlierCount] = useState<number | null>(null); // Stores the total count of outliers
-  const [preview, setPreview] = useState<any[]>([]); // Stores a preview of the uploaded data
-  const [columns, setColumns] = useState<ColumnAnalysis[]>([]); // Stores the analysis of each column
-  const [file, setFile] = useState<File | null>(null); // Stores the selected file object
-  const [selectedColumns, setSelectedColumns] = useState<string[]>([]); // Stores selected columns for outlier detection
-  const [isLoading, setIsLoading] = useState(false); // Indicates if a file upload is in progress
-  const [isAnalyzing, setIsAnalyzing] = useState(false); // Indicates if outlier detection is in progress
+  const [outliers, setOutliers] = useState<any[]>([]);
+  const [outlierCount, setOutlierCount] = useState<number | null>(null);
+  const [preview, setPreview] = useState<any[]>([]);
+  const [columns, setColumns] = useState<ColumnAnalysis[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+  const [selectedMissingColumns, setSelectedMissingColumns] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isImputing, setIsImputing] = useState(false);
+  const [imputationResult, setImputationResult] = useState<ImputationResult | null>(null);
 
   // Handles file selection from the input
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,51 +42,70 @@ const App = () => {
       setOutliers([]);
       setOutlierCount(null);
       setSelectedColumns([]);
+      setSelectedMissingColumns([]);
+      setImputationResult(null);
     }
   };
 
   // Handles the file upload and initial data analysis
   const handleUpload = async () => {
-    if (!file) return; // Do nothing if no file is selected
-    setIsLoading(true); // Set loading state to true
+    if (!file) return;
+    setIsLoading(true);
 
-    const formData = new FormData(); // Create a new FormData object to send the file
-    formData.append("file", file); // Append the file to the form data
+    const formData = new FormData();
+    formData.append("file", file);
 
     try {
       // Send the file for preview
       const previewRes = await axios.post("http://localhost:5643/upload/", formData);
-      setPreview(previewRes.data.preview); // Update preview state with response data
+      setPreview(previewRes.data.preview);
 
       // Send the file for column analysis
       const analysisRes = await axios.post("http://localhost:5643/analyze/", formData);
-      setColumns(analysisRes.data.columns); // Update columns state with response data
+      setColumns(analysisRes.data.columns);
     } catch (error) {
-      console.error("Ошибка при загрузке файла:", error); // Log any errors during upload
+      console.error("Ошибка при загрузке файла:", error);
     } finally {
-      setIsLoading(false); // Set loading state to false after upload completes or fails
+      setIsLoading(false);
+    }
+  };
+
+  // Handles missing values imputation with TabPFN
+  const handleImputeMissing = async () => {
+    if (!file || selectedMissingColumns.length === 0) return;
+    setIsImputing(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("columns", JSON.stringify(selectedMissingColumns));
+
+    try {
+      const res = await axios.post("http://localhost:5643/impute-missing/", formData);
+      setImputationResult(res.data);
+    } catch (error) {
+      console.error("Ошибка при заполнении пропусков:", error);
+    } finally {
+      setIsImputing(false);
     }
   };
 
   // Handles the outlier detection process
   const handleDetectOutliers = async () => {
-    if (!file || selectedColumns.length === 0) return; // Do nothing if no file or columns are selected
-    setIsAnalyzing(true); // Set analyzing state to true
+    if (!file || selectedColumns.length === 0) return;
+    setIsAnalyzing(true);
 
-    const formData = new FormData(); // Create new FormData for outlier detection
-    formData.append("file", file); // Append the file
-    // Append selected columns as a JSON string
+    const formData = new FormData();
+    formData.append("file", file);
     formData.append("columns", JSON.stringify(selectedColumns));
 
     try {
-      // Send data for outlier detection
       const res = await axios.post("http://localhost:5643/outliers/", formData);
-      setOutliers(res.data.outlier_preview); // Update outliers state
-      setOutlierCount(res.data.outlier_count); // Update outlier count state
+      setOutliers(res.data.outlier_preview);
+      setOutlierCount(res.data.outlier_count);
     } catch (error) {
-      console.error("Ошибка при определении выбросов:", error); // Log any errors
+      console.error("Ошибка при определении выбросов:", error);
     } finally {
-      setIsAnalyzing(false); // Set analyzing state to false
+      setIsAnalyzing(false);
     }
   };
 
@@ -96,11 +127,11 @@ const App = () => {
     switch (dtype) {
       case "int64":
       case "float64":
-        return <BarChart3 className="w-4 h-4" />; // Bar chart icon for numerical types
+        return <BarChart3 className="w-4 h-4" />;
       case "object":
-        return <FileText className="w-4 h-4" />; // File text icon for object types (strings)
+        return <FileText className="w-4 h-4" />;
       default:
-        return <Database className="w-4 h-4" />; // Database icon for other types
+        return <Database className="w-4 h-4" />;
     }
   };
 
@@ -248,6 +279,209 @@ const App = () => {
           </div>
         )}
 
+        {/* Missing Values Imputation Section */}
+        {columns.length > 0 && columns.some(col => col.nulls > 0) && (
+          <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl">
+                <Zap className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-800">Заполнение пропусков с TabPFN</h2>
+                <p className="text-gray-600">Выберите столбцы для интеллектуального заполнения пропущенных значений</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {columns
+                  .filter((col) => col.nulls > 0)
+                  .map((col) => (
+                    <label key={col.column} className="relative">
+                      <input
+                        type="checkbox"
+                        value={col.column}
+                        checked={selectedMissingColumns.includes(col.column)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedMissingColumns((prev) =>
+                            prev.includes(val)
+                              ? prev.filter((c) => c !== val)
+                              : [...prev, val]
+                          );
+                        }}
+                        className="sr-only"
+                      />
+                      <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
+                        selectedMissingColumns.includes(col.column)
+                          ? "border-purple-500 bg-purple-50 shadow-md"
+                          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
+                      }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                            selectedMissingColumns.includes(col.column)
+                              ? "border-purple-500 bg-purple-500"
+                              : "border-gray-300"
+                          }`}>
+                            {selectedMissingColumns.includes(col.column) && (
+                              <CheckCircle2 className="w-3 h-3 text-white" />
+                            )}
+                          </div>
+                          <span className="font-medium text-gray-900">{col.column}</span>
+                        </div>
+                        <div className="mt-2 text-sm text-amber-600 font-medium">
+                          {col.nulls} пропущенных значений
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+
+              <button
+                onClick={handleImputeMissing}
+                disabled={selectedMissingColumns.length === 0 || isImputing}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-xl font-medium transition-all duration-200 hover:shadow-lg transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
+              >
+                {isImputing ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Заполняем пропуски...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-5 h-5" />
+                    Заполнить пропуски с TabPFN
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Imputation Results Section */}
+        {imputationResult && (
+          <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
+            <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl">
+                  <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-purple-800">
+                    Результаты заполнения пропусков
+                  </h2>
+                  <p className="text-purple-600">Статистика обработки с помощью TabPFN</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Statistics Summary */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    <span className="font-semibold text-green-800">Обработано строк</span>
+                  </div>
+                  <div className="text-2xl font-bold text-green-900">{imputationResult.total_rows}</div>
+                </div>
+
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Database className="w-5 h-5 text-blue-600" />
+                    <span className="font-semibold text-blue-800">Столбцов обработано</span>
+                  </div>
+                  <div className="text-2xl font-bold text-blue-900">{Object.keys(imputationResult.missing_before).length}</div>
+                </div>
+
+                <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border border-purple-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="w-5 h-5 text-purple-600" />
+                    <span className="font-semibold text-purple-800">Всего заполнено</span>
+                  </div>
+                  <div className="text-2xl font-bold text-purple-900">
+                    {Object.values(imputationResult.missing_before).reduce((a, b) => a + b, 0) -
+                     Object.values(imputationResult.missing_after).reduce((a, b) => a + b, 0)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Column-wise Results */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-purple-50/80">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-purple-700">Столбец</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-purple-700">Пропусков до</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-purple-700">Пропусков после</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-purple-700">Заполнено</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-purple-700">Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-purple-200/50">
+                    {Object.keys(imputationResult.missing_before).map((col) => (
+                      <tr key={col} className="hover:bg-purple-50/50 transition-colors duration-150">
+                        <td className="px-6 py-4 font-medium text-gray-900">{col}</td>
+                        <td className="px-6 py-4 text-amber-700 font-medium">{imputationResult.missing_before[col]}</td>
+                        <td className="px-6 py-4 text-green-700 font-medium">{imputationResult.missing_after[col]}</td>
+                        <td className="px-6 py-4">
+                          <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                            {imputationResult.missing_before[col] - imputationResult.missing_after[col]}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          {imputationResult.processing_results[col] === "success" ? (
+                            <div className="flex items-center gap-2 text-green-600">
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span className="text-sm font-medium">Успешно</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-red-600">
+                              <AlertTriangle className="w-4 h-4" />
+                              <span className="text-sm font-medium">Ошибка</span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Preview of Processed Data */}
+              {imputationResult.preview.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Предварительный просмотр обработанных данных</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border border-gray-200 rounded-lg">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {Object.keys(imputationResult.preview[0]).map((key, idx) => (
+                            <th key={idx} className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">
+                              {key}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {imputationResult.preview.slice(0, 5).map((row, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50 transition-colors duration-150">
+                            {Object.values(row).map((val, i) => (
+                              <td key={i} className="px-4 py-3 text-sm text-gray-900">
+                                {String(val)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Outlier Detection Section */}
         {columns.length > 0 && (
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6">
@@ -264,7 +498,7 @@ const App = () => {
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {columns
-                  .filter((col) => col.dtype === "int64" || col.dtype === "float64") // Only show numerical columns
+                  .filter((col) => col.dtype === "int64" || col.dtype === "float64")
                   .map((col) => (
                     <label key={col.column} className="relative">
                       <input
@@ -275,25 +509,25 @@ const App = () => {
                           const val = e.target.value;
                           setSelectedColumns((prev) =>
                             prev.includes(val)
-                              ? prev.filter((c) => c !== val) // Remove if already selected
-                              : [...prev, val] // Add if not selected
+                              ? prev.filter((c) => c !== val)
+                              : [...prev, val]
                           );
                         }}
-                        className="sr-only" // Hide default checkbox
+                        className="sr-only"
                       />
                       <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
                         selectedColumns.includes(col.column)
-                          ? "border-blue-500 bg-blue-50 shadow-md" // Style for selected checkbox
-                          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm" // Style for unselected checkbox
+                          ? "border-blue-500 bg-blue-50 shadow-md"
+                          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
                       }`}>
                         <div className="flex items-center gap-3">
                           <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
                             selectedColumns.includes(col.column)
-                              ? "border-blue-500 bg-blue-500" // Background for checked state
-                              : "border-gray-300" // Border for unchecked state
+                              ? "border-blue-500 bg-blue-500"
+                              : "border-gray-300"
                           }`}>
                             {selectedColumns.includes(col.column) && (
-                              <CheckCircle2 className="w-3 h-3 text-white" /> // Check icon when selected
+                              <CheckCircle2 className="w-3 h-3 text-white" />
                             )}
                           </div>
                           <span className="font-medium text-gray-900">{col.column}</span>
@@ -346,7 +580,6 @@ const App = () => {
               <table className="w-full">
                 <thead className="bg-gray-50/80">
                   <tr>
-                    {/* Render table headers from the keys of the first row in preview data */}
                     {Object.keys(preview[0]).map((key, idx) => (
                       <th key={idx} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
                         {key}
@@ -355,13 +588,10 @@ const App = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200/50">
-                  {/* Render table rows from preview data */}
                   {preview.map((row, idx) => (
                     <tr key={idx} className="hover:bg-gray-50/50 transition-colors duration-150">
-                      {/* Render table cells from the values of each row */}
                       {Object.values(row).map((val, i) => (
                         <td key={i} className="px-6 py-4 text-gray-900">
-                          {/* Convert value to string for display */}
                           {String(val)}
                         </td>
                       ))}
@@ -374,7 +604,7 @@ const App = () => {
         )}
 
         {/* Outliers Results Section */}
-        {outlierCount !== null && ( // Conditionally render if outlierCount is available
+        {outlierCount !== null && (
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-red-200/50 overflow-hidden">
             <div className="p-6 border-b border-red-200/50 bg-gradient-to-r from-red-50 to-pink-50">
               <div className="flex items-center gap-3">
@@ -390,12 +620,11 @@ const App = () => {
               </div>
             </div>
 
-            {outliers.length > 0 && ( // Conditionally render outlier table if there are outliers
+            {outliers.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-red-50/80">
                     <tr>
-                      {/* Render table headers from the keys of the first outlier row */}
                       {Object.keys(outliers[0]).map((key, idx) => (
                         <th key={idx} className="px-6 py-4 text-left text-sm font-semibold text-red-700">
                           {key}
@@ -404,10 +633,8 @@ const App = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-red-200/50">
-                    {/* Render outlier rows */}
                     {outliers.map((row, idx) => (
                       <tr key={idx} className="hover:bg-red-50/50 transition-colors duration-150">
-                        {/* Render cells for each outlier value */}
                         {Object.values(row).map((val, i) => (
                           <td key={i} className="px-6 py-4 text-red-900 font-medium">
                             {String(val)}

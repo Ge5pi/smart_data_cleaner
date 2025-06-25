@@ -12,6 +12,9 @@ import os
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import LabelEncoder
 from tabpfn import TabPFNClassifier, TabPFNRegressor
+from fastapi.responses import StreamingResponse
+import io
+
 
 load_dotenv(dotenv_path="D:\\smart_data_cleaner\\backend\\.env", override=True)
 api_key = os.getenv("OPENAI_API_KEY")
@@ -203,7 +206,7 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
     }
 
 
-@app.post("/outliers/")
+"""@app.post("/outliers/")
 async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
     df = pd.read_csv(file.file, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
@@ -248,4 +251,37 @@ async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] =
         "outlier_count": len(outliers),
         "outlier_preview": outlier_preview,
         "columns_used": ast.literal_eval(response.output_text),
-    }
+    }"""
+
+@app.post("/download-cleaned/")
+async def download_cleaned(file: UploadFile = File(...), outlier_columns: Optional[str] = Form(None), impute_columns: Optional[str] = Form(None)):
+    df = pd.read_csv(file.file)
+    df = df.replace([np.inf, -np.inf], np.nan)
+
+    # === Step 1: Impute missing values ===
+    if impute_columns:
+        impute_cols = json.loads(impute_columns)
+        for col in impute_cols:
+            if df[col].isna().any():
+                df[col] = impute_missing_values_with_tabpfn(df, col)
+
+    # === Step 2: Remove outliers ===
+    if outlier_columns:
+        outlier_cols = json.loads(outlier_columns)
+        numeric_df = df[outlier_cols].select_dtypes(include=[np.number])
+        if not numeric_df.empty:
+            model = IsolationForest(n_estimators=100, max_samples=5000, contamination=0.05, n_jobs=-1, random_state=42)
+            model.fit(numeric_df)
+            df["outlier"] = model.predict(numeric_df)
+            df = df[df["outlier"] != -1].drop(columns=["outlier"])
+
+    # === Step 3: Prepare CSV response ===
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    stream.seek(0)
+
+    return StreamingResponse(
+        stream,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"},
+    )

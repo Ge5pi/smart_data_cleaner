@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp } from "lucide-react";
+import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp, ArrowDownCircle } from "lucide-react";
+
 import axios from "axios";
 
 type ColumnAnalysis = {
@@ -46,6 +47,31 @@ const App = () => {
       setImputationResult(null);
     }
   };
+
+  const handleDownloadCleaned = async () => {
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("outlier_columns", JSON.stringify(selectedColumns));
+  formData.append("impute_columns", JSON.stringify(selectedMissingColumns));
+
+  try {
+    const res = await axios.post("http://localhost:5643/download-cleaned/", formData, {
+      responseType: "blob",
+    });
+
+    const blob = new Blob([res.data], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cleaned_data.csv";
+    a.click();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Ошибка при скачивании очищенного файла", err);
+  }
+};
 
   // Handles the file upload and initial data analysis
   const handleUpload = async () => {
@@ -338,10 +364,11 @@ const App = () => {
               </div>
 
               <button
-                onClick={handleImputeMissing}
-                disabled={selectedMissingColumns.length === 0 || isImputing}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-xl font-medium transition-all duration-200 hover:shadow-lg transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
+                    onClick={handleDownloadCleaned}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-xl font-medium transition-all duration-200 hover:shadow-lg transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
               >
+
+
                 {isImputing ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -349,8 +376,8 @@ const App = () => {
                   </>
                 ) : (
                   <>
-                    <Zap className="w-5 h-5" />
-                    Заполнить пропуски с TabPFN
+
+                    Заполнить пропуски с TabPFN и скачать файл
                   </>
                 )}
               </button>
@@ -557,6 +584,7 @@ const App = () => {
                   </>
                 )}
               </button>
+
             </div>
           </div>
         )}
@@ -653,6 +681,11 @@ const App = () => {
             )}
           </div>
         )}
+
+        {file && (selectedColumns.length > 0 || selectedMissingColumns.length > 0) && (
+  <div className="flex justify-end mt-8">
+  </div>
+)}
       </div>
     </div>
   );

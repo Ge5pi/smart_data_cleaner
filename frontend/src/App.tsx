@@ -48,30 +48,59 @@ const App = () => {
     }
   };
 
-  const handleDownloadCleaned = async () => {
-  if (!file) return;
+  // Состояние для хранения ID обработанного файла
+  const [cleanedFileId, setCleanedFileId] = useState(null);
 
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("outlier_columns", JSON.stringify(selectedColumns));
-  formData.append("impute_columns", JSON.stringify(selectedMissingColumns));
+  // Состояние для отслеживания процесса очистки
+  const [isCleaning, setIsCleaning] = useState(false);
 
-  try {
-    const res = await axios.post("http://localhost:5643/download-cleaned/", formData, {
-      responseType: "blob",
-    });
+  // Состояние для отображения ошибок
+  const [error, setError] = useState(null);
 
-    const blob = new Blob([res.data], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
+  // --- Функция 1: Обработчик для кнопки "Очистить" ---
+  const handleClean = async () => {
+    if (!file) return;
+
+    setIsCleaning(true);
+    setError(null);
+    setCleanedFileId(null); // Сбрасываем предыдущий результат, если есть
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("outlier_columns", JSON.stringify(selectedColumns));
+    formData.append("impute_columns", JSON.stringify(selectedMissingColumns));
+
+    try {
+      const res = await axios.post("http://localhost:5643/clean-data/", formData);
+      setPreview(res.data.new_data);
+
+      if (res.data && res.data.file_id) {
+        setCleanedFileId(res.data.file_id);
+        console.log("Файл успешно очищен. ID:", res.data.file_id);
+      } else {
+        throw new Error("Сервер не вернул ID файла.");
+      }
+    } catch (err) {
+      console.error("Ошибка при очистке файла:", err);
+      setError("Произошла ошибка во время очистки. Пожалуйста, попробуйте еще раз.");
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
+  // --- Функция 2: Обработчик для кнопки "Скачать" ---
+  const handleDownload = () => {
+    if (!cleanedFileId) return;
+
+    const downloadUrl = `http://localhost:5643/download-cleaned/${cleanedFileId}`;
+
     const a = document.createElement("a");
-    a.href = url;
+    a.href = downloadUrl;
     a.download = "cleaned_data.csv";
+    document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error("Ошибка при скачивании очищенного файла", err);
-  }
-};
+    document.body.removeChild(a);
+  };
 
   // Handles the file upload and initial data analysis
   const handleUpload = async () => {
@@ -93,25 +122,6 @@ const App = () => {
       console.error("Ошибка при загрузке файла:", error);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // Handles missing values imputation with TabPFN
-  const handleImputeMissing = async () => {
-    if (!file || selectedMissingColumns.length === 0) return;
-    setIsImputing(true);
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("columns", JSON.stringify(selectedMissingColumns));
-
-    try {
-      const res = await axios.post("http://localhost:5643/impute-missing/", formData);
-      setImputationResult(res.data);
-    } catch (error) {
-      console.error("Ошибка при заполнении пропусков:", error);
-    } finally {
-      setIsImputing(false);
     }
   };
 
@@ -364,23 +374,21 @@ const App = () => {
               </div>
 
               <button
-                    onClick={handleDownloadCleaned}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-xl font-medium transition-all duration-200 hover:shadow-lg transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
-              >
+          onClick={handleClean}
+          disabled={!file || isCleaning} // Неактивна, если нет файла или идет очистка
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-xl font-medium transition-all duration-200 disabled:cursor-not-allowed"
+        >
+          {isCleaning ? "Очистка..." : "1. Очистить данные"}
+        </button>
 
-
-                {isImputing ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Заполняем пропуски...
-                  </>
-                ) : (
-                  <>
-
-                    Заполнить пропуски с TabPFN и скачать файл
-                  </>
-                )}
-              </button>
+        {/* Кнопка 2: Скачать результат */}
+        <button
+          onClick={handleDownload}
+          disabled={!cleanedFileId} // Неактивна, пока не будет получен file_id
+          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-xl font-medium transition-all duration-200 hover:shadow-lg transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
+        >
+          2. Скачать результат
+        </button>
             </div>
           </div>
         )}
@@ -598,8 +606,8 @@ const App = () => {
                   <Eye className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-800">Предварительный просмотр</h2>
-                  <p className="text-gray-600">Первые несколько строк данных</p>
+                  <h2 className="text-xl font-semibold text-gray-800">Просмотр файла</h2>
+                  <p className="text-gray-600">Просмотрите все данные в загруженном файле</p>
                 </div>
               </div>
             </div>

@@ -1,20 +1,20 @@
-import ast
+import uuid
 from typing import Optional
-import openai
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from openai import OpenAI
 from dotenv import load_dotenv
 import json
+from pathlib import Path
 import os
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import LabelEncoder
+from starlette.responses import FileResponse
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 from fastapi.responses import StreamingResponse
 import io
-
 
 load_dotenv(dotenv_path="D:\\smart_data_cleaner\\backend\\.env", override=True)
 api_key = os.getenv("OPENAI_API_KEY")
@@ -28,6 +28,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+TEMP_DIR = Path("temp_cleaned_files")
+TEMP_DIR.mkdir(exist_ok=True)
 
 
 def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
@@ -128,7 +131,7 @@ async def upload_csv(file: UploadFile = File(...)):
 
     df = df.astype(str)
 
-    preview_data = df.head(20).to_dict(orient="records")
+    preview_data = df.to_dict(orient="records")
 
     return {"preview": preview_data}
 
@@ -192,7 +195,7 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
     df_imputed = df_imputed.replace([np.inf, -np.inf], np.nan)
 
     # Convert the preview data and handle NaN values for JSON serialization
-    preview_data = df_imputed.head(10).fillna("null").to_dict(orient="records")
+    preview_data = df_imputed.fillna("null").to_dict(orient="records")
 
     # Alternative approach: replace NaN with None for JSON compatibility
     # preview_data = df_imputed.head(10).where(pd.notnull(df_imputed.head(10)), None).to_dict(orient="records")
@@ -245,8 +248,9 @@ async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] =
         "columns_used": selected_columns,
     }
 
-@app.post("/download-cleaned/")
-async def download_cleaned(file: UploadFile = File(...), outlier_columns: Optional[str] = Form(None), impute_columns: Optional[str] = Form(None)):
+
+@app.post("/clean-data/")
+async def download_cleaned(file: UploadFile = File(...), impute_columns: Optional[str] = Form(None)):
     df = pd.read_csv(file.file)
     df = df.replace([np.inf, -np.inf], np.nan)
 
@@ -257,7 +261,7 @@ async def download_cleaned(file: UploadFile = File(...), outlier_columns: Option
             if df[col].isna().any():
                 df[col] = impute_missing_values_with_tabpfn(df, col)
 
-    # === Step 2: Remove outliers ===
+    """# === Step 2: Remove outliers ===
     if outlier_columns:
         outlier_cols = json.loads(outlier_columns)
         numeric_df = df[outlier_cols].select_dtypes(include=[np.number])
@@ -265,15 +269,36 @@ async def download_cleaned(file: UploadFile = File(...), outlier_columns: Option
             model = IsolationForest(contamination=0.05, random_state=42)
             model.fit(numeric_df)
             df["outlier"] = model.predict(numeric_df)
-            df = df[df["outlier"] != -1].drop(columns=["outlier"])
+            df = df[df["outlier"] != -1].drop(columns=["outlier"])"""
+    file_id = str(uuid.uuid4())
+    output_filename = f"{file_id}.csv"
+    output_path = TEMP_DIR / output_filename
+    df.to_csv(output_path, index=False)
+    return {"message": "File cleaned successfully", "file_id": file_id, "new_data": df.fillna("null").to_dict(orient="records")}
 
-    # === Step 3: Prepare CSV response ===
-    stream = io.StringIO()
-    df.to_csv(stream, index=False)
-    stream.seek(0)
+    # # === Step 3: Prepare CSV response ===
+    # stream = io.StringIO()
+    # df.to_csv(stream, index=False)
+    # stream.seek(0)
+    #
+    # return StreamingResponse(
+    #     stream,
+    #     media_type="text/csv",
+    #     headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"},
+    # )
 
-    return StreamingResponse(
-        stream,
+
+@app.get("/download-cleaned/{file_id}")
+async def download_cleaned(file_id: str):
+    file_path = TEMP_DIR / f"{file_id}.csv"
+
+    # Важная проверка безопасности: убедиться, что файл существует и находится в нашей временной директории
+    if not file_path.is_file() or not str(file_path.resolve()).startswith(str(TEMP_DIR.resolve())):
+        raise HTTPException(status_code=404, detail="File not found or access denied.")
+
+    return FileResponse(
+        path=file_path,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"},
+        filename="cleaned_data.csv",
+        headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"}
     )

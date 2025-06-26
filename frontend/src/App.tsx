@@ -249,8 +249,8 @@ const App = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto max-h-[350px] overflow-auto">
+              <table className="w-full ">
                 <thead className="bg-gray-50/80">
                   <tr>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Столбец</th>
@@ -313,13 +313,13 @@ const App = () => {
                 <Zap className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-semibold text-gray-800">Заполнение пропусков с TabPFN</h2>
+                <h2 className="text-xl font-semibold text-gray-800 ">Заполнение пропусков с TabPFN</h2>
                 <p className="text-gray-600">Выберите столбцы для интеллектуального заполнения пропущенных значений</p>
               </div>
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-auto">
                 {columns
                   .filter((col) => col.nulls > 0)
                   .map((col) => (
@@ -404,7 +404,7 @@ const App = () => {
 
             <div className="p-6 space-y-6">
               {/* Statistics Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 ">
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-200">
                   <div className="flex items-center gap-2 mb-2">
                     <CheckCircle2 className="w-5 h-5 text-green-600" />
@@ -523,7 +523,7 @@ const App = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-auto">
                 {columns
                   .filter((col) => col.dtype === "int64" || col.dtype === "float64")
                   .map((col) => (
@@ -604,12 +604,12 @@ const App = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50/80">
+            <div className="border border-gray-300 rounded-md max-h-[350px] overflow-auto">
+              <table className="min-w-[1000px] w-full border-collapse">
+                <thead className="bg-gray-50/80 sticky top-0 z-10">
                   <tr>
                     {Object.keys(preview[0]).map((key, idx) => (
-                      <th key={idx} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <th key={idx} className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b border-r">
                         {key}
                       </th>
                     ))}
@@ -648,7 +648,7 @@ const App = () => {
               </div>
             </div>
 
-            {outliers.length > 0 && (
+            {outliers && outliers.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-red-50/80">
@@ -674,7 +674,7 @@ const App = () => {
                 </table>
               </div>
             )}
-            {outliers.length === 0 && outlierCount === 0 && (
+            { outliers && outliers.length === 0 && outlierCount === 0 && (
                 <div className="p-6 text-center text-gray-600">
                     Нет выбросов, обнаруженных в выбранных столбцах.
                 </div>

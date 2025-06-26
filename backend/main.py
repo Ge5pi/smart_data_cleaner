@@ -128,7 +128,7 @@ async def upload_csv(file: UploadFile = File(...)):
 
     df = df.astype(str)
 
-    preview_data = df.head(5).to_dict(orient="records")
+    preview_data = df.head(20).to_dict(orient="records")
 
     return {"preview": preview_data}
 
@@ -206,52 +206,44 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
     }
 
 
-"""@app.post("/outliers/")
+@app.post("/outliers/")
 async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
     df = pd.read_csv(file.file, encoding="utf-8")
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
 
     if columns:
         import json
         selected_columns = json.loads(columns)
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.dropna(subset=selected_columns)  # ❗ Только по нужным колонкам
         numeric_df = df[selected_columns].select_dtypes(include=[np.number])
     else:
+        df = df.replace([np.inf, -np.inf], np.nan)
         numeric_df = df.select_dtypes(include=[np.number])
+        df = df.dropna(subset=numeric_df.columns.tolist())  # ❗ Только по числовым
 
     if numeric_df.shape[1] == 0:
         return {"error": "Нет числовых данных для анализа выбросов."}
 
-    response = client.responses.create(
-        model="gpt-4.1-nano",
-        input=[
-            {
-                "role": "developer",
-                "content": "you will be given a list of columns of dataframe and head() of it. Look through the context"
-                           " and state which columns will be the most useful to search for outliers. Give them as a "
-                           "list: ['column_1', 'column_2', ...]. as an answer you should give only a list."
-            },
-            {
-                "role": "user",
-                "content": f"columns: {numeric_df.columns}, head: {numeric_df.head()}"
-            }
-        ]
-    )
-    print(response.output_text)
+    print(numeric_df)
 
     model = IsolationForest(n_estimators=100, max_samples=5000, contamination=0.05, n_jobs=-1, random_state=42)
-    model.fit(numeric_df[eval(response.output_text)])
+    model.fit(numeric_df)
 
-    df["outlier"] = model.predict(numeric_df[ast.literal_eval(response.output_text)])
+    df["outlier"] = model.predict(numeric_df)
 
     outliers = df[df["outlier"] == -1].drop(columns=["outlier"])
 
-    outlier_preview = outliers.head(5).to_dict(orient="records")
+    outlier_preview = (
+        outliers.head(5)
+            .replace([np.inf, -np.inf, np.nan], None)
+            .to_dict(orient="records")
+    )
 
     return {
         "outlier_count": len(outliers),
         "outlier_preview": outlier_preview,
-        "columns_used": ast.literal_eval(response.output_text),
-    }"""
+        "columns_used": selected_columns,
+    }
 
 @app.post("/download-cleaned/")
 async def download_cleaned(file: UploadFile = File(...), outlier_columns: Optional[str] = Form(None), impute_columns: Optional[str] = Form(None)):
@@ -270,7 +262,7 @@ async def download_cleaned(file: UploadFile = File(...), outlier_columns: Option
         outlier_cols = json.loads(outlier_columns)
         numeric_df = df[outlier_cols].select_dtypes(include=[np.number])
         if not numeric_df.empty:
-            model = IsolationForest(n_estimators=100, max_samples=5000, contamination=0.05, n_jobs=-1, random_state=42)
+            model = IsolationForest(contamination=0.05, random_state=42)
             model.fit(numeric_df)
             df["outlier"] = model.predict(numeric_df)
             df = df[df["outlier"] != -1].drop(columns=["outlier"])

@@ -45,29 +45,33 @@ const App = () => {
       setSelectedColumns([]);
       setSelectedMissingColumns([]);
       setImputationResult(null);
+      // MODIFIED: Reset IDs as well
+      setUploadedFileId(null);
+      setCleanedFileId(null);
     }
   };
 
-  // Состояние для хранения ID обработанного файла
-  const [cleanedFileId, setCleanedFileId] = useState(null);
+  // State for storing the processed file ID
+  const [cleanedFileId, setCleanedFileId] = useState<string | null>(null);
+  const [uploadedFileId, setUploadedFileId] = useState<string | null>(null);
 
-  // Состояние для отслеживания процесса очистки
+  // State for tracking the cleaning process
   const [isCleaning, setIsCleaning] = useState(false);
 
-  // Состояние для отображения ошибок
-  const [error, setError] = useState(null);
+  // State for displaying errors
+  const [error, setError] = useState<string | null>(null);
 
-  // --- Функция 1: Обработчик для кнопки "Очистить" ---
+  // MODIFIED: This function now sends file_id instead of the whole file.
   const handleClean = async () => {
-    if (!file) return;
+    if (!uploadedFileId) return; // Guard against no file uploaded
 
     setIsCleaning(true);
     setError(null);
-    setCleanedFileId(null); // Сбрасываем предыдущий результат, если есть
+    setCleanedFileId(null);
 
     const formData = new FormData();
-    formData.append("file", file);
-    formData.append("outlier_columns", JSON.stringify(selectedColumns));
+    formData.append("file_id", uploadedFileId); // Use the stored file ID
+    // formData.append("outlier_columns", JSON.stringify(selectedColumns)); // This is not used by the optimized backend endpoint
     formData.append("impute_columns", JSON.stringify(selectedMissingColumns));
 
     try {
@@ -75,7 +79,7 @@ const App = () => {
       setPreview(res.data.new_data);
 
       if (res.data && res.data.file_id) {
-        setCleanedFileId(res.data.file_id);
+        setCleanedFileId(res.data.file_id); // The same file_id is returned
         console.log("Файл успешно очищен. ID:", res.data.file_id);
       } else {
         throw new Error("Сервер не вернул ID файла.");
@@ -88,7 +92,7 @@ const App = () => {
     }
   };
 
-  // --- Функция 2: Обработчик для кнопки "Скачать" ---
+  // This function is correct and needs no changes.
   const handleDownload = () => {
     if (!cleanedFileId) return;
 
@@ -102,36 +106,45 @@ const App = () => {
     document.body.removeChild(a);
   };
 
-  // Handles the file upload and initial data analysis
+  // MODIFIED: This function now handles upload and subsequent analysis efficiently.
   const handleUpload = async () => {
     if (!file) return;
     setIsLoading(true);
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
 
     try {
-      // Send the file for preview
-      const previewRes = await axios.post("http://localhost:5643/upload/", formData);
-      setPreview(previewRes.data.preview);
+      // Step 1: Upload the file and get the ID
+      const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData);
+      const fileId = uploadRes.data.file_id;
 
-      // Send the file for column analysis
-      const analysisRes = await axios.post("http://localhost:5643/analyze/", formData);
-      setColumns(analysisRes.data.columns);
+      setPreview(uploadRes.data.preview);
+      setUploadedFileId(fileId);
+
+      // Step 2: Use the new fileId to get the analysis without re-uploading the file
+      if (fileId) {
+        const analysisFormData = new FormData();
+        analysisFormData.append("file_id", fileId);
+        const analysisRes = await axios.post("http://localhost:5643/analyze/", analysisFormData);
+        setColumns(analysisRes.data.columns);
+      }
+
     } catch (error) {
-      console.error("Ошибка при загрузке файла:", error);
+      console.error("Ошибка при загрузке и анализе файла:", error);
+      setError("Не удалось загрузить или проанализировать файл.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Handles the outlier detection process
+  // MODIFIED: This function now sends file_id instead of the whole file.
   const handleDetectOutliers = async () => {
-    if (!file || selectedColumns.length === 0) return;
+    if (!uploadedFileId || selectedColumns.length === 0) return;
     setIsAnalyzing(true);
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file_id", uploadedFileId); // Use the stored file ID
     formData.append("columns", JSON.stringify(selectedColumns));
 
     try {
@@ -140,6 +153,7 @@ const App = () => {
       setOutlierCount(res.data.outlier_count);
     } catch (error) {
       console.error("Ошибка при определении выбросов:", error);
+      setError("Не удалось определить выбросы.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -183,6 +197,9 @@ const App = () => {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
               Smart Data Cleaner
             </h1>
+            <a href={`/chat?file_id=${uploadedFileId}`}>
+              Перейти в чат
+            </a>
             <div className="ml-auto flex items-center gap-2 text-sm text-gray-500">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               Готов к работе

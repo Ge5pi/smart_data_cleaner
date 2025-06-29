@@ -1,5 +1,7 @@
 import uuid
 from typing import Optional
+
+import openai
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -10,17 +12,32 @@ import json
 from pathlib import Path
 import os
 from sklearn.ensemble import IsolationForest
+import httpx
 from sklearn.preprocessing import LabelEncoder
 from starlette.responses import FileResponse
 from tabpfn import TabPFNClassifier, TabPFNRegressor
-from fastapi.responses import StreamingResponse
-import io
+import pinecone
+from tenacity import retry, wait_random_exponential, stop_after_attempt
+from tqdm import tqdm
 
 load_dotenv(dotenv_path="D:\\smart_data_cleaner\\backend\\.env", override=True)
-api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
 
+api_key = os.getenv("OPENAI_API_KEY")
+pinecone_key = os.getenv("PINECONE_API_KEY")
+webhook_test_key = os.getenv("WEBHOOK_TEST_KEY")
+
+client = OpenAI(api_key=api_key)
+pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI()
+
+N8N_WEBHOOK_URL = f"http://localhost:5678/webhook-test/{webhook_test_key}"
+index_name = "soda-index"
+index = pc.Index(index_name)
+TEXT_COLUMN = "text"
+ID_COLUMN = "id"
+BATCH_SIZE = 100
+EMBEDDING_MODEL = "text-embedding-3-small"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,6 +48,23 @@ app.add_middleware(
 
 TEMP_DIR = Path("temp_cleaned_files")
 TEMP_DIR.mkdir(exist_ok=True)
+
+
+async def trigger_n8n_workflow(file_id: str):
+    if not N8N_WEBHOOK_URL:
+        print("Переменная N8N_WEBHOOK_URL не установлена. Пропуск вызова вебхука.")
+        return
+
+    payload = {"file_id": file_id}
+
+    try:
+        async with httpx.AsyncClient() as web_client:
+            print(f"Отправка вебхука в n8n для file_id: {file_id}")
+            response = await web_client.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+            response.raise_for_status()
+            print(f"Вебхук успешно отправлен. Статус ответа n8n: {response.status_code}")
+    except httpx.RequestError as e:
+        print(f"Ошибка при вызове вебхука n8n: {e}")
 
 
 def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
@@ -122,24 +156,78 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
         return df_work[target_column]
 
 
+def combine_columns(row):
+    return " | ".join([f"{col}: {str(row[col])}" for col in row.index])
+
+
+@retry(wait=wait_random_exponential(min=1, max=5), stop=stop_after_attempt(6))
+def get_embeddings(texts: list[str]):
+    client = openai.OpenAI(api_key=api_key)
+
+    response = client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=texts
+    )
+    return [r["embedding"] for r in response["data"]]
+
+# MODIFIED: Only this endpoint now accepts a file upload.
 @app.post("/upload/")
 async def upload_csv(file: UploadFile = File(...)):
     df = pd.read_csv(file.file, encoding="utf-8")
+    file_id = str(uuid.uuid4())
 
     df = df.replace([np.inf, -np.inf], np.nan)
+
+    output_filename = f"{file_id}.csv"
+    output_path = TEMP_DIR / output_filename
+    df.to_csv(output_path, index=False)
+
+
     df = df.where(pd.notnull(df), None)
 
     df = df.astype(str)
-
     preview_data = df.to_dict(orient="records")
+    if ID_COLUMN not in df.columns:
+        df[ID_COLUMN] = [f"row-{i}" for i in range(len(df))]
 
-    return {"preview": preview_data}
+    df[TEXT_COLUMN] = df.apply(combine_columns, axis=1)
+
+    for i in tqdm(range(0, len(df), BATCH_SIZE), desc="Uploading to Pinecone"):
+        batch_df = df.iloc[i:i + BATCH_SIZE]
+        texts = batch_df[TEXT_COLUMN].astype(str).tolist()
+        ids = batch_df[ID_COLUMN].astype(str).tolist()
 
 
+        embeddings = get_embeddings(texts)
+
+        print(embeddings)
+
+        vectors = [
+            {
+                "id": ids[j],
+                "values": embeddings[j],
+                "metadata": {
+                    "original_text": texts[j],
+                    "file_id": file_id
+                }
+            } for j in range(len(ids))
+        ]
+
+        print("Vectors:", vectors)
+
+        index.upsert(vectors)
+    return {"preview": preview_data, "file_id": file_id}
+
+
+# MODIFIED: Accepts file_id instead of the file.
 @app.post("/analyze/")
-async def analyze_csv(file: UploadFile = File(...)):
-    df = pd.read_csv(file.file, encoding="utf-8")
-    df = df.replace([np.inf, -np.inf], np.nan).where(pd.notnull(df), None)
+async def analyze_csv(file_id: str = Form(...)):
+    file_path = TEMP_DIR / f"{file_id}.csv"
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    df = pd.read_csv(file_path, encoding="utf-8")
+    df = df.replace([np.inf, -np.inf], np.nan)
 
     analysis = []
     for col in df.columns:
@@ -155,9 +243,14 @@ async def analyze_csv(file: UploadFile = File(...)):
     return {"columns": analysis}
 
 
+# MODIFIED: Accepts file_id instead of the file.
 @app.post("/impute-missing/")
-async def impute_missing_values(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
-    df = pd.read_csv(file.file, encoding="utf-8")
+async def impute_missing_values(file_id: str = Form(...), columns: Optional[str] = Form(None)):
+    file_path = TEMP_DIR / f"{file_id}.csv"
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    df = pd.read_csv(file_path, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan)
 
     if columns:
@@ -168,9 +261,7 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
     if not selected_columns:
         return {"error": "Нет столбцов с пропущенными значениями для обработки."}
 
-    missing_before = {}
-    for col in selected_columns:
-        missing_before[col] = int(df[col].isna().sum())
+    missing_before = {col: int(df[col].isna().sum()) for col in selected_columns}
 
     df_imputed = df.copy()
     processing_results = {}
@@ -180,25 +271,16 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
             try:
                 print(f"Обрабатываем столбец: {col}")
                 df_imputed[col] = impute_missing_values_with_tabpfn(df, col)
-                # Clean the imputed column to ensure no inf/-inf values remain
                 df_imputed[col] = df_imputed[col].replace([np.inf, -np.inf], np.nan)
                 processing_results[col] = "success"
             except Exception as e:
                 print(f"Ошибка при обработке столбца {col}: {e}")
                 processing_results[col] = f"error: {str(e)}"
 
-    missing_after = {}
-    for col in selected_columns:
-        missing_after[col] = int(df_imputed[col].isna().sum())
+    missing_after = {col: int(df_imputed[col].isna().sum()) for col in selected_columns}
 
-    # Clean the entire dataframe before creating preview
     df_imputed = df_imputed.replace([np.inf, -np.inf], np.nan)
-
-    # Convert the preview data and handle NaN values for JSON serialization
     preview_data = df_imputed.fillna("null").to_dict(orient="records")
-
-    # Alternative approach: replace NaN with None for JSON compatibility
-    # preview_data = df_imputed.head(10).where(pd.notnull(df_imputed.head(10)), None).to_dict(orient="records")
 
     return {
         "preview": preview_data,
@@ -209,38 +291,35 @@ async def impute_missing_values(file: UploadFile = File(...), columns: Optional[
     }
 
 
+# MODIFIED: Accepts file_id instead of the file.
 @app.post("/outliers/")
-async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] = Form(None)):
-    df = pd.read_csv(file.file, encoding="utf-8")
+async def detect_outliers(file_id: str = Form(...), columns: Optional[str] = Form(None)):
+    file_path = TEMP_DIR / f"{file_id}.csv"
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    df = pd.read_csv(file_path, encoding="utf-8")
 
     if columns:
         import json
         selected_columns = json.loads(columns)
         df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.dropna(subset=selected_columns)  # ❗ Только по нужным колонкам
+        df = df.dropna(subset=selected_columns)
         numeric_df = df[selected_columns].select_dtypes(include=[np.number])
     else:
         df = df.replace([np.inf, -np.inf], np.nan)
         numeric_df = df.select_dtypes(include=[np.number])
-        df = df.dropna(subset=numeric_df.columns.tolist())  # ❗ Только по числовым
+        df = df.dropna(subset=numeric_df.columns.tolist())
 
     if numeric_df.shape[1] == 0:
         return {"error": "Нет числовых данных для анализа выбросов."}
-
-    print(numeric_df)
 
     model = IsolationForest(n_estimators=100, max_samples=5000, contamination=0.05, n_jobs=-1, random_state=42)
     model.fit(numeric_df)
 
     df["outlier"] = model.predict(numeric_df)
-
     outliers = df[df["outlier"] == -1].drop(columns=["outlier"])
-
-    outlier_preview = (
-        outliers.head(5)
-            .replace([np.inf, -np.inf, np.nan], None)
-            .to_dict(orient="records")
-    )
+    outlier_preview = outliers.head(5).replace([np.inf, -np.inf, np.nan], None).to_dict(orient="records")
 
     return {
         "outlier_count": len(outliers),
@@ -249,50 +328,38 @@ async def detect_outliers(file: UploadFile = File(...), columns: Optional[str] =
     }
 
 
+# MODIFIED: This is the main modification endpoint.
+# It now accepts file_id, loads the file, processes it, and saves it back to the same path.
 @app.post("/clean-data/")
-async def download_cleaned(file: UploadFile = File(...), impute_columns: Optional[str] = Form(None)):
-    df = pd.read_csv(file.file)
+async def clean_data(file_id: str = Form(...), impute_columns: Optional[str] = Form(None)):
+    file_path = TEMP_DIR / f"{file_id}.csv"
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    df = pd.read_csv(file_path)
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    # === Step 1: Impute missing values ===
     if impute_columns:
         impute_cols = json.loads(impute_columns)
         for col in impute_cols:
             if df[col].isna().any():
                 df[col] = impute_missing_values_with_tabpfn(df, col)
 
-    """# === Step 2: Remove outliers ===
-    if outlier_columns:
-        outlier_cols = json.loads(outlier_columns)
-        numeric_df = df[outlier_cols].select_dtypes(include=[np.number])
-        if not numeric_df.empty:
-            model = IsolationForest(contamination=0.05, random_state=42)
-            model.fit(numeric_df)
-            df["outlier"] = model.predict(numeric_df)
-            df = df[df["outlier"] != -1].drop(columns=["outlier"])"""
-    file_id = str(uuid.uuid4())
-    output_filename = f"{file_id}.csv"
-    output_path = TEMP_DIR / output_filename
-    df.to_csv(output_path, index=False)
-    return {"message": "File cleaned successfully", "file_id": file_id, "new_data": df.fillna("null").to_dict(orient="records")}
+    # Overwrite the existing file with the cleaned data
+    df.to_csv(file_path, index=False)
 
-    # # === Step 3: Prepare CSV response ===
-    # stream = io.StringIO()
-    # df.to_csv(stream, index=False)
-    # stream.seek(0)
-    #
-    # return StreamingResponse(
-    #     stream,
-    #     media_type="text/csv",
-    #     headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"},
-    # )
+    return {
+        "message": "File cleaned successfully",
+        "file_id": file_id,  # Return the same file_id
+        "new_data": df.fillna("null").to_dict(orient="records")
+    }
 
 
+# MODIFIED: Renamed function for clarity. The endpoint remains the same.
 @app.get("/download-cleaned/{file_id}")
-async def download_cleaned(file_id: str):
+async def download_cleaned_file(file_id: str):
     file_path = TEMP_DIR / f"{file_id}.csv"
 
-    # Важная проверка безопасности: убедиться, что файл существует и находится в нашей временной директории
     if not file_path.is_file() or not str(file_path.resolve()).startswith(str(TEMP_DIR.resolve())):
         raise HTTPException(status_code=404, detail="File not found or access denied.")
 

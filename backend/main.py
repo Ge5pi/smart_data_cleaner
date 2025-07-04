@@ -17,15 +17,20 @@ from tqdm import tqdm
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import LabelEncoder
 from tabpfn import TabPFNClassifier, TabPFNRegressor
+from config import API_KEY, PINECONE_KEY, DATABASE_URL
+import crud, models, schemas, database
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from fastapi import APIRouter
+
 
 # ==============================================================================
 # 1. КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
 # ==============================================================================
 
-load_dotenv()
-
-api_key = os.getenv("OPENAI_API_KEY")
-pinecone_key = os.getenv("PINECONE_API_KEY")
+api_key = API_KEY
+pinecone_key = PINECONE_KEY
 
 client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
@@ -37,6 +42,11 @@ AGENT_MODEL = "gpt-4o"
 CRITIC_MODEL = "gpt-4o"
 INDEX_NAME = "soda-index"
 BATCH_SIZE = 100
+
+
+user_router = APIRouter()
+
+
 
 # Настройка CORS
 app.add_middleware(
@@ -57,6 +67,17 @@ index = pc.Index(INDEX_NAME)
 file_metadata_storage = {}
 session_cache = {}
 
+
+@user_router.post("/users/register", response_model=schemas.User)
+def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
+    db_user = crud.get_user_by_email(db, email=user.email)
+
+    if db_user:
+        raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
+    new_user = crud.create_user(db=db, user=user)
+    return new_user
+
+app.include_router(user_router)
 
 # ==============================================================================
 # 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ИНСТРУМЕНТЫ ИЗ ОРИГИНАЛЬНОГО ФАЙЛА

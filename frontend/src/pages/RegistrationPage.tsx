@@ -26,19 +26,26 @@ const RegistrationPage = () => {
     setIsLoading(true);
     setError(null);
 
-    const formData = new FormData();
-    formData.append('username', email); // FastAPI OAuth2 использует 'username'
-    formData.append('password', password);
+    // --- НАЧАЛО ИСПРАВЛЕНИЙ ---
+
+    // 1. Создаем обычный JavaScript объект вместо FormData.
+    //    Используем ключ 'email', как того требует Pydantic-схема на бэкенде.
+    const userData = {
+      email: email,
+      password: password
+    };
 
     try {
-      // Этот эндпоинт мы создадим на бэкенде
-      await axios.post('http://localhost:8000/users/register', formData, {
-        headers: {
-            'Content-Type': 'multipart/form-data',
-        },
-      });
+      // 2. Передаем объект userData напрямую.
+      //    Axios автоматически преобразует его в JSON и установит правильный заголовок Content-Type.
+      await axios.post('http://localhost:5643/users/register', userData);
+
       alert('Регистрация прошла успешно! Теперь вы можете войти.');
-      navigate('/login'); // Перенаправляем на страницу входа (которую можно создать по аналогии)
+      // Примечание: Убедитесь, что вы используете правильный порт (8000, а не 5643)
+      navigate('/login'); // Перенаправляем на страницу входа
+
+    // --- КОНЕЦ ИСПРАВЛЕНИЙ ---
+
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.detail) {
         setError(err.response.data.detail);
@@ -47,9 +54,9 @@ const RegistrationPage = () => {
       }
       console.error(err);
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Этот блок выполнится в любом случае
     }
-  };
+};
 
   return (
     <div className="max-w-md mx-auto px-6 py-12">

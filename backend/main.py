@@ -9,6 +9,7 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette import status
 from starlette.responses import FileResponse
 import openai
 import pinecone
@@ -23,7 +24,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from fastapi import APIRouter
-
+from datetime import timedelta
+import auth
 
 # ==============================================================================
 # 1. КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
@@ -43,10 +45,7 @@ CRITIC_MODEL = "gpt-4o"
 INDEX_NAME = "soda-index"
 BATCH_SIZE = 100
 
-
 user_router = APIRouter()
-
-
 
 # Настройка CORS
 app.add_middleware(
@@ -77,7 +76,45 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_d
     new_user = crud.create_user(db=db, user=user)
     return new_user
 
+@user_router.post("/token")
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+    # authenticate_user будет искать юзера по email (form_data.username) и проверять пароль
+    user = auth.authenticate_user(db, email=form_data.username, password=form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный email или пароль",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/sessions/start")
+async def start_session(file_id: str = Form(...), current_user: models.User = Depends(auth.get_current_active_user)):
+    # Теперь эта функция будет выполнена, только если пользователь предоставил валидный токен.
+    # Объект пользователя доступен в переменной current_user.
+    print(f"Пользователь {current_user.email} (ID: {current_user.id}) начинает новую сессию.")
+
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="Файл с таким ID не найден.")
+    session_id = str(uuid.uuid4())
+    df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
+
+    # В будущем можно будет привязать сессию к current_user.id
+    session_cache[session_id] = {
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
+        "dataframe": df,
+        "file_id": file_id,
+        "user_id": current_user.id  # Сохраняем ID пользователя в сессии
+    }
+    return {"session_id": session_id, "message": "Сессия успешно начата."}
+
 app.include_router(user_router)
+
 
 # ==============================================================================
 # 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ИНСТРУМЕНТЫ ИЗ ОРИГИНАЛЬНОГО ФАЙЛА

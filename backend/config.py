@@ -10,6 +10,7 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_KEY = os.getenv("PINECONE_API_KEY")
+SECRET_KEY = "MYSECRETFORSODA"
 
 # Проверка, что переменная для БД установлена
 if DATABASE_URL is None:

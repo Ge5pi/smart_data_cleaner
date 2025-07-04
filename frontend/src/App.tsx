@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import DataCleanerPage from './pages/DataCleanerPage';
 import ChatPage from './pages/ChatPage';
 import RegistrationPage from './pages/RegistrationPage';
+import LoginPage from './pages/LoginPage';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Route index element={<DataCleanerPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="register" element={<RegistrationPage />} />
+          <Route path="login" element={<LoginPage />} />
         </Route>
       </Routes>
     </AppProvider>

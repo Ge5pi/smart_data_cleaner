@@ -86,7 +86,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         localStorage.removeItem('authToken');
         setToken(null);
         setUser(null);
-        // Можно добавить сброс и других состояний
+        setFileId(null);
+        setSessionId(null);
+        setColumns([]);
+        setPreview([]);
     };
 
   // Функция сброса состояния при выборе нового файла

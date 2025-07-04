@@ -1,48 +1,53 @@
-// src/pages/LoginPage.tsx
 import React, { useState, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AppContext } from '../contexts/AppContext'; // Убедитесь, что путь правильный
+import { useNavigate, useLocation } from 'react-router-dom';
+import { AppContext } from '../contexts/AppContext';
 import axios from 'axios';
 import { KeyRound, Mail, Loader, LogIn } from 'lucide-react';
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+    // ... (все ваши useState остаются без изменений)
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
 
-  const navigate = useNavigate();
-  const { login } = useContext(AppContext)!; // Получаем функцию login из контекста
+    const navigate = useNavigate();
+    const location = useLocation(); // <-- Получаем location
+    const { login } = useContext(AppContext)!;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
+    // Получаем путь, с которого пользователя перенаправили, или '/' по умолчанию
+    const from = location.state?.from?.pathname || "/";
 
-    // ВАЖНО: FastAPI OAuth2PasswordRequestForm ожидает данные в формате application/x-www-form-urlencoded
-    // FormData идеально для этого подходит.
-    const formData = new URLSearchParams();
-    formData.append('username', email); // Поле должно называться 'username'
-    formData.append('password', password);
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError(null);
 
-    try {
-      const res = await axios.post('http://localhost:5643/token', formData);
-      const token = res.data.access_token;
+        const formData = new URLSearchParams();
+        formData.append('username', email);
+        formData.append('password', password);
 
-      login(token); // Вызываем функцию login из контекста
+        try {
+            const res = await axios.post('http://localhost:5643/token', formData);
+            const token = res.data.access_token;
 
-      navigate('/'); // Перенаправляем на главную страницу после успешного входа
-    } catch (err: any) {
-      if (err.response && err.response.data && err.response.data.detail) {
-        setError(err.response.data.detail);
-      } else {
-        setError('Произошла ошибка при входе.');
-      }
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+            login(token);
+
+            // --- ИЗМЕНЕНИЕ ---
+            // Перенаправляем пользователя на ту страницу, куда он хотел попасть
+            navigate(from, { replace: true });
+
+        } catch (err: any) {
+            // ... (обработка ошибок без изменений)
+            if (err.response && err.response.data && err.response.data.detail) {
+                setError(err.response.data.detail);
+            } else {
+                setError('Произошла ошибка при входе.');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
   return (
     <div className="max-w-md mx-auto px-6 py-12">

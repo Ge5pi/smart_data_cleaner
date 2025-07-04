@@ -4,21 +4,16 @@ import json
 from pathlib import Path
 import os
 import io
-
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
-
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
-
 import openai
 import pinecone
-import tiktoken
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from tqdm import tqdm
-
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import LabelEncoder
 from tabpfn import TabPFNClassifier, TabPFNRegressor
@@ -80,11 +75,13 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
 def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
     # ... (Ваш код функции impute_missing_values_with_tabpfn без изменений)
     df_work = df.copy()
-    if not df_work[target_column].isna().any(): return df_work[target_column]
+    if not df_work[target_column].isna().any():
+        return df_work[target_column]
     mask_missing = df_work[target_column].isna()
     df_complete = df_work[~mask_missing]
     df_missing = df_work[mask_missing]
-    if len(df_complete) == 0: return df_work[target_column]
+    if len(df_complete) == 0:
+        return df_work[target_column]
     if len(df_complete) > max_samples:
         df_complete = df_complete.sample(n=max_samples, random_state=42)
     feature_columns = [col for col in df_work.columns if col != target_column]
@@ -93,7 +90,8 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
         if df_complete[col].isna().sum() / len(df_complete) > 0.5 or df_complete[col].nunique() > 100:
             continue
         useful_features.append(col)
-    if not useful_features: return df_work[target_column]
+    if not useful_features:
+        return df_work[target_column]
     X_train, y_train, X_predict = df_complete[useful_features].copy(), df_complete[target_column].copy(), df_missing[
         useful_features].copy()
     for col in useful_features:
@@ -115,7 +113,8 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
             model.fit(X_train.values, y_train_encoded)
             predictions_encoded = model.predict(X_predict.values)
             predictions = le_target.inverse_transform(predictions_encoded)
-            if y_train.dtype != 'object': predictions = pd.Series(predictions).astype(y_train.dtype).values
+            if y_train.dtype != 'object':
+                predictions = pd.Series(predictions).astype(y_train.dtype).values
         else:
             model = TabPFNRegressor(device='cpu')
             model.fit(X_train.values, y_train.values)
@@ -134,24 +133,27 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
 
 def get_critic_evaluation(query: str, answer: str) -> dict:
     """Вызывает модель-критика для оценки ответа."""
-    critic_prompt = f"""
-    You are a meticulous and impartial AI critic. Your task is to evaluate a given answer based on a user's query.
-    Provide your evaluation in a structured JSON format.
+    critic_prompt = f""" You are a meticulous AI data analyst critic. Your task is to evaluate a generated answer 
+    based on a user's query. Provide your evaluation in a structured JSON format. 
 
-    **User Query:**
-    {query}
+        **User Query:**
+        {query}
 
-    **Answer to Evaluate:**
-    {answer}
+        **Answer to Evaluate:**
+        {answer}
 
-    **Evaluation Criteria:**
-    1.  **relevance**: How relevant is the answer to the user's query? (1-5, where 5 is most relevant)
-    2.  **completeness**: Does the answer fully address all parts of the query? (1-5, where 5 is most complete)
-    3.  **confidence**: How confident are you in the factual accuracy of the answer, based on the likely context of a pandas DataFrame? (1-5, where 5 is most confident)
-    4.  **feedback**: Provide brief, constructive feedback for improvement if the scores are low. If the answer is good, say "The answer is sufficient.".
+        **Evaluation Criteria:** 1.  **relevance**: Is the answer directly related to the user's query? (1-5, 
+        5 is most relevant) 2.  **completeness**: Does the answer fully address all parts of the query? (1-5, 
+        5 is most complete) 3.  **accuracy**: How likely is the answer to be factually correct in a pandas DataFrame 
+        context? Does it seem plausible? (1-5, 5 is most accurate) 4.  **feedback**: Provide CONCISE and ACTIONABLE 
+        feedback. - If the answer is good, write "The answer is sufficient.". - If the answer is bad, explain WHY it 
+        is bad. For example: "The answer hallucinates information not present in the query" or "The calculation seems 
+        incorrect for the requested metric." 5.  **suggestion**: If the answer is poor, suggest a better approach. 
+        For example: "It would be better to use `df.groupby('category')['sales'].sum()`" or "A better approach would 
+        be to use the RAG tool to find the specific row." 
 
-    **Output (JSON format only):**
-    """
+        **Output (JSON format only):**
+        """
     try:
         response = client.chat.completions.create(
             model=CRITIC_MODEL,
@@ -166,24 +168,27 @@ def get_critic_evaluation(query: str, answer: str) -> dict:
                 "feedback": "Critic model failed, assuming success."}
 
 
-def get_refined_answer(history: list, original_answer: str, feedback: str) -> str:
+def get_refined_answer(history: list, original_answer: str, feedback: str, suggestion: str) -> str:
     """Вызывает модель-улучшателя для исправления ответа."""
-    refiner_prompt = f"""
-    You are a world-class data analyst. Your task is to refine and improve a previous answer based on the feedback provided by a critic.
-    The last user question is at the end of the conversation history.
+    refiner_prompt = f""" You are an expert data analyst. Your previous attempt to answer a user's question was 
+    flawed. A critic has provided feedback. Your task is to generate a new, final, and correct answer that 
+    incorporates this feedback. 
 
-    **Original Conversation History:**
-    {json.dumps(history, indent=2, ensure_ascii=False)}
+        **Original Conversation History:**
+        {json.dumps(history, indent=2, ensure_ascii=False)}
 
-    **Your previous (unsatisfactory) answer:**
-    {original_answer}
+        **Your previous (unsatisfactory) answer:**
+        {original_answer}
 
-    **Critic's Feedback for Improvement:**
-    {feedback}
+        **Critic's Feedback (What was wrong):**
+        {feedback}
 
-    **Your Task:**
-    Generate a new, improved, and complete answer that directly addresses the user's last question and the critic's feedback.
-    """
+        **Critic's Suggestion (How to fix it):**
+        {suggestion}
+
+        **Your Task:** Generate a new, improved, and complete answer. The new answer must directly address the user's 
+        last question and fix the issues raised by the critic. Do not repeat the mistakes. Present the final result 
+        clearly to the user. """
     response = client.chat.completions.create(
         model=AGENT_MODEL,
         messages=[{"role": "user", "content": refiner_prompt}],
@@ -196,21 +201,31 @@ def get_refined_answer(history: list, original_answer: str, feedback: str) -> st
 # 4. ЯДРО AI-АГЕНТА (Инструменты и определение)
 # ==============================================================================
 
-SYSTEM_PROMPT = """
-Ты — элитный AI-аналитик данных. Ты работаешь в интерактивной сессии с пользователем.
-1.  У тебя есть DataFrame, хранящийся в переменной `df`. Все твои операции должны изменять этот DataFrame.
-2.  Твой главный инструмент — `execute_python_code`. Используй его для выполнения любых операций с `df`: фильтрации, создания новых столбцов, группировки (`groupby`), агрегации (`agg`).
-3.  Для неструктурированных вопросов, требующих смыслового поиска по тексту, используй `answer_question_from_context`.
-4.  Думай по шагам. Если нужно, вызови несколько инструментов подряд.
-5.  После выполнения кода покажи пользователю результат и кратко объясни, что ты сделал.
-6.  Всегда будь готов к следующему вопросу, который будет основан на текущем состоянии данных.
-"""
+SYSTEM_PROMPT = """Ты — элитный AI-аналитик данных SODA (Strategic Operations & Data Analyst). Твоя работа — помогать 
+пользователю анализировать данные в pandas DataFrame `df`. 
+
+**Твой мыслительный процесс должен быть следующим:** 1.  **Анализ Запроса:** Внимательно изучи вопрос пользователя и 
+предоставленный контекст (`df.info()`, `df.head()`). Определи ключевую цель пользователя: он хочет изменить данные, 
+получить агрегированную информацию, найти что-то конкретное или понять смысл данных? 2.  **Выбор Инструмента:** 
+Основываясь на цели, выбери ОДИН из доступных инструментов. *   Используй `execute_python_code`, если запрос требует: 
+- Математических операций (среднее, сумма, группировка, подсчет). - Фильтрации или сортировки данных (`df[...]`, 
+`.query()`, `.sort_values()`). - Модификации DataFrame (создание новых столбцов, удаление, заполнение пропусков). - 
+Получения информации о структуре данных (`df.describe()`, `df.corr()`). *   Используй `answer_question_from_context`, 
+если запрос требует: - Найти и описать конкретные строки по смысловому содержанию (например, "Что известно о клиенте 
+Иване Петрове?", "Найди записи, связанные с 'неудачной доставкой'"). - Ответить на общие вопросы, ответ на которые 
+может содержаться в одной или нескольких строках как текст. *   Используй `save_dataframe_to_file` **ТОЛЬКО** если 
+пользователь явно и недвусмысленно попросил "сохрани файл", "запиши изменения" или аналогичное. Всегда уточняй перед 
+сохранением, если не уверен. 3.  **Формулировка Ответа:** После выполнения инструмента, предоставь пользователю 
+четкий и лаконичный ответ. *   Если ты использовал `execute_python_code`, покажи результат (обычно это 
+markdown-таблица) и кратко объясни, что он означает. *   Если ты получил ошибку при выполнении кода, проанализируй 
+ее, исправь свой код и попробуй снова. Не повторяй одну и ту же ошибку. *   Отвечай всегда на языке запроса. """
 
 
 def execute_python_code(session_id: str, code: str) -> str:
     """Выполняет Python-код, умеет захватывать результат последней строки."""
     print(f"TOOL (session: {session_id}): Выполнение кода:\n---\n{code}\n---")
-    if session_id not in session_cache: return "Ошибка: Сессия не найдена."
+    if session_id not in session_cache:
+        return "Ошибка: Сессия не найдена."
     current_df = session_cache[session_id]["dataframe"]
     local_scope = {"df": current_df, "pd": pd, "impute_missing_values_with_tabpfn": impute_missing_values_with_tabpfn,
                    "IsolationForest": IsolationForest}
@@ -235,43 +250,95 @@ def execute_python_code(session_id: str, code: str) -> str:
 
 
 def run_rag_pipeline(file_id: str, query: str) -> str:
-    """Выполняет RAG-поиск по исходному файлу."""
+    # ... (Ваш код run_rag_pipeline без изменений)
     query_embedding = get_embeddings([query])[0]
     search_results = index.query(vector=query_embedding, top_k=7, filter={"file_id": file_id}, include_metadata=True)
-    context = ""
+    context = " "
     if search_results.get('matches'):
         for match in search_results['matches']:
             context += match['metadata']['original_text'] + "\n---\n"
-    if not context: return "Не удалось найти релевантную информацию в файле."
-    rag_messages = [{"role": "system",
-                     "content": "Ответь на вопрос пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на предоставленном контексте."},
-                    {"role": "user", "content": f"Контекст:\n{context}\n\nВопрос: {query}"}]
+    if not context:
+        return "Не удалось найти релевантную информацию в файле."
+    rag_messages = [{"role": "system", "content": "Ответь на вопрос пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на "
+                                                  "предоставленном контексте."}, {"role": "user", "content":
+        f"Контекст:\n{context}\n\nВопрос: {query}"}]
     response = client.chat.completions.create(model=AGENT_MODEL, messages=rag_messages, temperature=0.0)
     return response.choices[0].message.content
+
+
+def save_dataframe_to_file(session_id: str) -> str:
+    """
+    Сохраняет текущее состояние DataFrame сессии обратно в исходный файл.
+    Перезаписывает файл на диске. Используется только по прямому указанию пользователя.
+    """
+    print(f"TOOL (session: {session_id}): Сохранение файла...")
+    if session_id not in session_cache:
+        return "Ошибка: Сессия не найдена."
+
+    file_id = session_cache[session_id].get("file_id")
+    if not file_id:
+        return "Ошибка: file_id не найден в сессии."
+
+    file_path_str = file_metadata_storage.get(file_id, {}).get("file_path")
+    if not file_path_str:
+        return "Ошибка: Путь к файлу не найден в метаданных."
+
+    # ПРОВЕРКА БЕЗОПАСНОСТИ: Убедимся, что путь находится внутри нашей временной директории
+    file_path = Path(file_path_str).resolve()
+    if TEMP_DIR.resolve() not in file_path.parents:
+        return "Ошибка безопасности: Попытка записи файла за пределами разрешенной директории."
+
+    try:
+        df_to_save = session_cache[session_id]["dataframe"]
+        df_to_save.to_csv(file_path, index=False)
+        return f"Файл успешно сохранен по пути: {file_path_str}. Все изменения применены."
+    except Exception as e:
+        return f"Ошибка при сохранении файла: {e}"
 
 
 def answer_question_from_context(session_id: str, query: str) -> str:
     """Инструмент-обертка для RAG."""
     print(f"TOOL (session: {session_id}): RAG-запрос: '{query}'")
     file_id = session_cache.get(session_id, {}).get("file_id")
-    if not file_id: return "Ошибка: не найден исходный file_id."
+    if not file_id:
+        return "Ошибка: не найден исходный file_id."
     return run_rag_pipeline(file_id, query)
 
 
-tools_definition = [{"type": "function", "function": {"name": "execute_python_code",
-                                                      "description": "Выполняет Python-код с pandas для манипуляции данными. Оперируй с переменной 'df'.",
-                                                      "parameters": {"type": "object",
-                                                                     "properties": {"session_id": {"type": "string"},
-                                                                                    "code": {"type": "string"}},
-                                                                     "required": ["session_id", "code"]}}},
-                    {"type": "function", "function": {"name": "answer_question_from_context",
-                                                      "description": "Ответить на нечеткий, семантический вопрос.",
-                                                      "parameters": {"type": "object",
-                                                                     "properties": {"session_id": {"type": "string"},
-                                                                                    "query": {"type": "string"}},
-                                                                     "required": ["session_id", "query"]}}}]
-available_functions = {"execute_python_code": execute_python_code,
-                       "answer_question_from_context": answer_question_from_context}
+tools_definition = [
+    {"type": "function", "function": {
+        "name": "execute_python_code",
+        "description": "Выполняет Python-код для манипуляций с DataFrame `df`. Используется для расчетов, агрегации, "
+                       "фильтрации, модификации данных.",
+        "parameters": {
+            "type": "object", "properties": {"session_id": {"type": "string"}, "code": {"type": "string"}},
+            "required": ["session_id", "code"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "answer_question_from_context",
+        "description": "Ищет в файле строки по смысловому содержанию и отвечает на вопрос на их основе. Пример: 'Что "
+                       "можешь рассказать о заказе A-123?', 'Опиши клиента с самой большой суммой покупки'. НЕ "
+                       "использовать для математики или агрегации.",
+        "parameters": {
+            "type": "object", "properties": {"session_id": {"type": "string"}, "query": {"type": "string"}},
+            "required": ["session_id", "query"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "save_dataframe_to_file",
+        "description": "Сохраняет текущий DataFrame `df` в исходный файл. Использовать только по прямой и явной "
+                       "просьбе пользователя, например: 'Сохрани результат'.",
+        "parameters": {
+            "type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"]
+        }
+    }},
+]
+available_functions = {
+    "execute_python_code": execute_python_code,
+    "answer_question_from_context": answer_question_from_context,
+    "save_dataframe_to_file": save_dataframe_to_file,  # Регистрируем новый инструмент
+}
 
 
 # ==============================================================================
@@ -309,7 +376,8 @@ async def upload_csv(file: UploadFile = File(...)):
         texts_to_embed = [v['metadata']['original_text'] for v in batch]
         try:
             embeddings = get_embeddings(texts_to_embed)
-            for j, vector in enumerate(batch): vector["values"] = embeddings[j]
+            for j, vector in enumerate(batch):
+                vector["values"] = embeddings[j]
             index.upsert(vectors=batch)
         except Exception as e:
             print(f"Ошибка при обработке пачки {i}-{i + BATCH_SIZE}: {e}")
@@ -338,28 +406,18 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...)):
     """Задает вопрос в рамках сессии с новым циклом оценки и улучшения."""
     if session_id not in session_cache:
         raise HTTPException(status_code=404, detail="Сессия не найдена.")
-
-    # --- НОВОЕ: Добавление контекста о DataFrame к каждому запросу ---
     df = session_cache[session_id]["dataframe"]
     buf = io.StringIO()
     df.info(buf=buf)
     df_info = buf.getvalue()
     df_head = df.head().to_markdown()
-
-    contextual_query = f"""
-Контекст данных:
-1. Схема данных (df.info()): {df_info}
-2. Первые 5 строк (df.head()): {df_head}
----
-Вопрос пользователя: {query}
-"""
+    contextual_query = f"Контекст данных:\n1. Схема данных (df.info()):\n```\n{df_info}```\n2. Первые 5 строк (" \
+                       f"df.head()):\n```\n{df_head}```\n---\nВопрос пользователя: {query} "
     messages = session_cache[session_id]["messages"]
     messages.append({"role": "user", "content": contextual_query})
-
     try:
-        # --- ШАГ 1: ПОЛУЧЕНИЕ ПЕРВОНАЧАЛЬНОГО ОТВЕТА АГЕНТА ---
         initial_answer = ""
-        for _ in range(5):  # Агентский цикл
+        for _ in range(5):
             response = client.chat.completions.create(model=AGENT_MODEL, messages=messages, tools=tools_definition,
                                                       tool_choice="auto")
             response_message = response.choices[0].message
@@ -375,24 +433,22 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...)):
                 initial_answer = response_message.content
                 messages.append(response_message)
                 break
-
         if not initial_answer:
             raise HTTPException(status_code=500, detail="Модель не смогла сгенерировать первоначальный ответ.")
-
-        # --- ШАГ 2: ОЦЕНКА ОТВЕТА КРИТИКОМ ---
         evaluation = get_critic_evaluation(query, initial_answer)
         print(f"Critic Evaluation: {evaluation}")
-
         final_answer = initial_answer
-        # --- ШАГ 3: УЛУЧШЕНИЕ ОТВЕТА, ЕСЛИ НЕОБХОДИМО ---
-        if evaluation.get("confidence", 5) < 4:
+        if evaluation.get("accuracy", 5) < 4:
             print("Ответ неудовлетворительный. Запускается модель-улучшатель...")
-            final_answer = get_refined_answer(messages, initial_answer, evaluation.get("feedback"))
+            final_answer = get_refined_answer(
+                messages,
+                initial_answer,
+                evaluation.get("feedback"),
+                evaluation.get("suggestion", "")
+            )
             messages.append({"role": "assistant", "content": final_answer})
-
         session_cache[session_id]["messages"] = messages
         return {"answer": final_answer, "evaluation": evaluation}
-
     except Exception as e:
         session_cache[session_id]["messages"] = messages
         raise HTTPException(status_code=500, detail=f"Произошла внутренняя ошибка: {str(e)}")
@@ -403,7 +459,8 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...)):
 @app.post("/analyze/")
 async def analyze_csv(file_id: str = Form(...)):
     # ... (Ваш код эндпоинта /analyze/ без изменений)
-    if file_id not in file_metadata_storage: raise HTTPException(status_code=404, detail="File not found.")
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="File not found.")
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
     analysis = [{"column": col, "dtype": str(df[col].dtype), "nulls": int(df[col].isna().sum()),
                  "unique": int(df[col].nunique()), "sample_values": df[col].dropna().astype(str).unique()[:3].tolist()}
@@ -414,11 +471,12 @@ async def analyze_csv(file_id: str = Form(...)):
 @app.post("/impute-missing/")
 async def impute_missing_values(file_id: str = Form(...), columns: Optional[str] = Form(None)):
     # ... (Ваш код эндпоинта /impute-missing/ без изменений)
-    if file_id not in file_metadata_storage: raise HTTPException(status_code=404, detail="File not found.")
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="File not found.")
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
     selected_columns = json.loads(columns) if columns else [col for col in df.columns if df[col].isna().any()]
-    if not selected_columns: return {"error": "Нет столбцов с пропущенными значениями."}
-    missing_before = {col: int(df[col].isna().sum()) for col in selected_columns}
+    if not selected_columns:
+        return {"error": "Нет столбцов с пропущенными значениями."}
     df_imputed = df.copy()
     for col in selected_columns:
         if df[col].isna().any():
@@ -429,12 +487,13 @@ async def impute_missing_values(file_id: str = Form(...), columns: Optional[str]
 
 @app.post("/outliers/")
 async def detect_outliers(file_id: str = Form(...), columns: Optional[str] = Form(None)):
-    # ... (Ваш код эндпоинта /outliers/ без изменений)
-    if file_id not in file_metadata_storage: raise HTTPException(status_code=404, detail="File not found.")
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="File not found.")
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
     selected_columns = json.loads(columns) if columns else df.select_dtypes(include=np.number).columns.tolist()
     numeric_df = df[selected_columns].select_dtypes(include=np.number)
-    if numeric_df.empty: return {"error": "Нет числовых данных для анализа."}
+    if numeric_df.empty:
+        return {"error": "Нет числовых данных для анализа."}
     df_na_dropped = numeric_df.dropna()
     model = IsolationForest(contamination=0.05, random_state=42)
     predictions = model.fit_predict(df_na_dropped)
@@ -445,7 +504,7 @@ async def detect_outliers(file_id: str = Form(...), columns: Optional[str] = For
 
 @app.get("/download-cleaned/{file_id}")
 async def download_cleaned_file(file_id: str):
-    # ... (Ваш код эндпоинта /download-cleaned/ без изменений)
-    if file_id not in file_metadata_storage: raise HTTPException(status_code=404, detail="File not found.")
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="File not found.")
     file_path = file_metadata_storage[file_id]['file_path']
     return FileResponse(path=file_path, media_type="text/csv", filename="cleaned_data.csv")

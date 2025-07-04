@@ -3,6 +3,7 @@ import { AppProvider } from './contexts/AppContext';
 import Layout from './components/Layout';
 import DataCleanerPage from './pages/DataCleanerPage';
 import ChatPage from './pages/ChatPage';
+import RegistrationPage from './pages/RegistrationPage';
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<DataCleanerPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="register" element={<RegistrationPage />} />
         </Route>
       </Routes>
     </AppProvider>

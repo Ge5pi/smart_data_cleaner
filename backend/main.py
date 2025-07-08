@@ -1,4 +1,5 @@
 import uuid
+from contextlib import asynccontextmanager
 from typing import Optional
 import json
 from pathlib import Path
@@ -34,6 +35,38 @@ import auth
 api_key = API_KEY
 pinecone_key = PINECONE_KEY
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Код, который выполняется при старте сервера ---
+    print("--- Populating file metadata cache on startup ---")
+    # Используем 'with' для корректного закрытия сессии
+    with database.SessionLocal() as db:
+        try:
+            # Убедитесь, что функция get_all_files существует в crud.py
+            all_files_from_db = crud.get_all_files(db)
+            for file_record in all_files_from_db:
+                file_id = file_record.file_uid
+                output_path = TEMP_DIR / f"{file_id}.csv"
+
+                # Добавляем в кэш, только если файл физически существует
+                if output_path.exists():
+                    file_metadata_storage[file_id] = {
+                        "file_path": str(output_path),
+                        "file_name": file_record.file_name,
+                    }
+                    print(f"  - Cached metadata for file: {file_id}")
+                else:
+                    print(f"  - Skipped caching for missing file on disk: {file_id}")
+        except Exception as e:
+            print(f"Error during cache population: {e}")
+
+    print("--- Cache population complete. Application is ready. ---")
+    yield
+    # --- Код, который выполняется при остановке сервера ---
+    file_metadata_storage.clear()
+    print("--- Cleared file metadata cache on shutdown ---")
+
 client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI()
@@ -45,7 +78,7 @@ CRITIC_MODEL = "gpt-4o"
 INDEX_NAME = "soda-index"
 BATCH_SIZE = 100
 
-user_router = APIRouter()
+user_router = APIRouter(lifespan=lifespan)
 
 # Настройка CORS
 app.add_middleware(
@@ -62,7 +95,6 @@ if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(name=INDEX_NAME, dimension=1536, metric='cosine')
 index = pc.Index(INDEX_NAME)
 
-# Хранилища состояний в памяти
 file_metadata_storage = {}
 session_cache = {}
 
@@ -94,6 +126,15 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+@user_router.get("/files/me", response_model=list[schemas.File])
+def read_user_files(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Возвращает список файлов для текущего пользователя."""
+    return crud.get_files_by_user_id(db=db, user_id=current_user.id)
+
+
 @app.post("/sessions/start")
 async def start_session(file_id: str = Form(...), current_user: models.User = Depends(auth.get_current_active_user)):
     # Теперь эта функция будет выполнена, только если пользователь предоставил валидный токен.
@@ -105,7 +146,6 @@ async def start_session(file_id: str = Form(...), current_user: models.User = De
     session_id = str(uuid.uuid4())
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
 
-    # В будущем можно будет привязать сессию к current_user.id
     session_cache[session_id] = {
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
         "dataframe": df,
@@ -408,7 +448,6 @@ async def upload_csv(
 ):
     file_id = str(uuid.uuid4())
     output_path = TEMP_DIR / f"{file_id}.csv"
-
     original_filename = file.filename
 
     crud.create_user_file(
@@ -418,14 +457,21 @@ async def upload_csv(
         file_name=original_filename
     )
 
-    df = pd.read_csv(file.file, encoding="utf-8")
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df.to_csv(output_path, index=False)
+    # Сохраняем файл на диск
+    with open(output_path, "wb") as buffer:
+        buffer.write(await file.read())
 
+    # Теперь читаем его для обработки
+    df = pd.read_csv(output_path)
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df.to_csv(output_path, index=False) # Пересохраняем после обработки
+
+    # Обновляем кэш в памяти
     file_metadata_storage[file_id] = {
+        "file_path": str(output_path),
+        "file_name": original_filename,
         "total_rows": len(df),
         "column_names": df.columns.tolist(),
-        "file_path": str(output_path)
     }
 
     vectors_to_upsert = []
@@ -574,3 +620,20 @@ async def download_cleaned_file(file_id: str):
         raise HTTPException(status_code=404, detail="File not found.")
     file_path = file_metadata_storage[file_id]['file_path']
     return FileResponse(path=file_path, media_type="text/csv", filename="cleaned_data.csv")
+
+
+@app.post("/analyze-existing/")
+async def analyze_existing_file(file_id: str = Form(...)):
+    file_path = f"{TEMP_DIR}//{file_id}.csv"
+
+    try:
+        df = pd.read_csv(file_path)
+        analysis = [{"column": col, "dtype": str(df[col].dtype), "nulls": int(df[col].isna().sum()),
+                     "unique": int(df[col].nunique()),
+                     "sample_values": df[col].dropna().astype(str).unique()[:3].tolist()}
+                    for col in df.columns]
+        preview_data = df.head(10).fillna("null").to_dict(orient="records")
+
+        return {"columns": analysis, "preview": preview_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read or analyze file: {str(e)}")

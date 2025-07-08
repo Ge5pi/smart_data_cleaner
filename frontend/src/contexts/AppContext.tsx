@@ -36,6 +36,9 @@ type AppContextType = {
   user: User | null;
   login: (token: string) => void;
   logout: () => void;
+  userFiles: any[];
+  setUserFiles: React.Dispatch<React.SetStateAction<any[]>>;
+  isAuthCheckComplete: boolean;
 };
 
 export const AppContext = createContext<AppContextType | null>(null);
@@ -51,6 +54,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
   const [user, setUser] = useState<User | null>(null);
+  const [userFiles, setUserFiles] = useState<any[]>([]);
 
   useEffect(() => {
         const storedToken = localStorage.getItem('authToken');
@@ -116,7 +120,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     user,
     login,
     logout,
-    isAuthCheckComplete
+    isAuthCheckComplete,
+    userFiles,
+    setUserFiles
   };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

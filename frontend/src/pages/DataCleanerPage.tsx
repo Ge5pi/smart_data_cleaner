@@ -1,8 +1,9 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { AppContext } from '../contexts/AppContext';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp, Loader } from "lucide-react";
+import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp, Loader, History, FileClock } from "lucide-react";
+import { format } from 'date-fns';
 
 // Определим тип для результатов импутации, чтобы было проще работать
 type ImputationResult = {
@@ -17,7 +18,9 @@ const DataCleanerPage = () => {
     // Получаем глобальное состояние и функции из AppContext
     const {
         file, setFile, fileId, setFileId, columns, setColumns, preview, setPreview,
-        isLoading, setIsLoading, error, setError, resetState
+        isLoading, setIsLoading, error, setError, resetState,
+        token,
+        userFiles, setUserFiles
     } = useContext(AppContext)!;
 
     // Локальные состояния, которые используются только на этой странице
@@ -29,6 +32,51 @@ const DataCleanerPage = () => {
     const [outliers, setOutliers] = useState<any[]>([]);
     const [outlierCount, setOutlierCount] = useState<number | null>(null);
 
+
+    // --- 1. ЗАГРУЗКА СПИСКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЯ ---
+    useEffect(() => {
+        const fetchUserFiles = async () => {
+            if (token) {
+                try {
+                    const res = await axios.get("http://localhost:5643/files/me", {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    setUserFiles(res.data);
+                } catch (err) {
+                    console.error("Не удалось загрузить список файлов:", err);
+                }
+            }
+        };
+        fetchUserFiles();
+    }, [token, setUserFiles]);
+
+    // --- 2. ФУНКЦИЯ ВЫБОРА И АНАЛИЗА СУЩЕСТВУЮЩЕГО ФАЙЛА ---
+    const handleSelectFile = async (selectedFileId: string, selectedFileName: string) => {
+        resetState(); // Сбрасываем все предыдущие состояния
+        setIsLoading(true);
+        setError(null);
+
+        // Создаем настоящий, но пустой объект File для консистентности типа в состоянии
+        const placeholderFile = new File([""], selectedFileName, { type: "text/csv" });
+        setFile(placeholderFile);
+
+        const formData = new FormData();
+        formData.append("file_id", selectedFileId);
+
+        try {
+            const res = await axios.post("http://localhost:5643/analyze-existing/", formData);
+            setFileId(selectedFileId);
+            setColumns(res.data.columns);
+            setPreview(res.data.preview);
+        } catch (err: any) {
+            console.error(err);
+            setError("Не удалось проанализировать выбранный файл.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // --- 3. ФУНКЦИЯ ВЫБОРА НОВОГО ФАЙЛА С ДИСКА ---
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files?.[0]) {
             resetState(); // Сбрасываем глобальное состояние (fileId, etc.)
@@ -42,55 +90,50 @@ const DataCleanerPage = () => {
         }
     };
 
+    // --- 4. ФУНКЦИЯ ЗАГРУЗКИ НОВОГО ФАЙЛА НА СЕРВЕР ---
     const handleUpload = async () => {
-    if (!file) return;
-    setIsLoading(true);
-    setError(null);
+        if (!file) return;
+        setIsLoading(true);
+        setError(null);
 
-    // --- ИСПРАВЛЕНИЕ ---
-    // Используем правильный ключ 'authToken' вместо 'soda_token'
-    const token = localStorage.getItem('authToken');
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
-    if (!token) {
-        setError("Ошибка аутентификации: токен не найден. Пожалуйста, войдите в систему заново.");
-        setIsLoading(false);
-        return;
-    }
-
-    const uploadFormData = new FormData();
-    uploadFormData.append("file", file);
-
-    try {
-        const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData, {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
-        });
-        const newFileId = uploadRes.data.file_id;
-        setFileId(newFileId);
-        setPreview(uploadRes.data.preview);
-
-        const analysisFormData = new FormData();
-        analysisFormData.append("file_id", newFileId);
-
-        // Примечание: этот запрос не отправляет токен. Если эндпоинт /analyze/ защищен,
-        // сюда также нужно будет добавить headers с токеном.
-        const analysisRes = await axios.post("http://localhost:5643/analyze/", analysisFormData);
-        setColumns(analysisRes.data.columns);
-
-    } catch (err: any) {
-        console.error(err);
-        if (err.response && err.response.status === 401) {
-            setError("Ошибка авторизации. Ваша сессия могла истечь. Пожалуйста, войдите заново.");
-        } else {
-            setError("Не удалось загрузить или проанализировать файл.");
+        // Используем токен из контекста, а не из localStorage напрямую
+        if (!token) {
+            setError("Ошибка аутентификации: токен не найден. Пожалуйста, войдите в систему заново.");
+            setIsLoading(false);
+            return;
         }
-    } finally {
-        setIsLoading(false);
-    }
-};
 
+        const uploadFormData = new FormData();
+        uploadFormData.append("file", file);
+
+        try {
+            const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            // Обновляем список файлов в UI после успешной загрузки
+            const newFile = {
+                file_uid: uploadRes.data.file_id,
+                file_name: file.name,
+                datetime_created: new Date().toISOString()
+            };
+            setUserFiles(prev => [newFile, ...prev]);
+
+            // Сразу анализируем только что загруженный файл, вызвав другую нашу функцию
+            await handleSelectFile(uploadRes.data.file_id, file.name);
+
+        } catch (err: any) {
+            console.error(err);
+            if (err.response && err.response.status === 401) {
+                setError("Ошибка авторизации. Ваша сессия могла истечь.");
+            } else {
+                setError("Не удалось загрузить файл.");
+            }
+            setIsLoading(false); // Важно сбросить загрузку при ошибке
+        }
+    };
+
+    // --- 5. ОСТАЛЬНЫЕ ОБРАБОТЧИКИ ---
     const handleImpute = async () => {
         if (!fileId || selectedMissingCols.length === 0) return;
         setIsImputing(true);
@@ -135,6 +178,7 @@ const DataCleanerPage = () => {
         window.open(`http://localhost:5643/download-cleaned/${fileId}`, '_blank');
     };
 
+    // --- 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СТИЛИЗАЦИИ ---
     const getTypeColor = (dtype: string) => {
         if (dtype.includes("int") || dtype.includes("float")) return "bg-blue-100 text-blue-800";
         if (dtype.includes("object")) return "bg-green-100 text-green-800";
@@ -148,174 +192,219 @@ const DataCleanerPage = () => {
     };
 
     return (
-        <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-            {/* Upload Section */}
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-8">
-                <div className="flex items-center gap-4 mb-6">
-                    <div className="p-3 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl"><Upload className="w-6 h-6 text-white" /></div>
-                    <div><h2 className="text-xl font-semibold text-gray-800">1. Загрузка данных</h2><p className="text-gray-600">Выберите CSV файл для анализа и очистки</p></div>
-                </div>
-                <div className="flex items-center gap-4">
-                    <label htmlFor="file-upload" className="flex items-center gap-2 px-6 py-3 bg-white border-2 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
-                        <FileText className="text-gray-600" /> <span className="text-gray-700 font-medium">{file ? file.name : "Выбрать файл"}</span>
-                        <input id="file-upload" type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
-                    </label>
-                    <button onClick={handleUpload} disabled={!file || isLoading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
-                        {isLoading ? <><Loader className="w-5 h-5 animate-spin" /><span>Загрузка...</span></> : <><Upload className="w-5 h-5" /><span>Загрузить</span></>}
-                    </button>
-                </div>
-                {error && <p className="mt-4 text-red-600 bg-red-100 p-3 rounded-lg">{error}</p>}
-                {fileId && (
-                    <div className="mt-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
-                        <h3 className="font-semibold text-indigo-800">Файл успешно загружен!</h3>
-                        <p className="text-indigo-700 mt-1">Теперь вы можете использовать инструменты ниже или перейти к диалогу с AI-агентом для продвинутого анализа.</p>
-                        <Link to="/chat" className="mt-3 inline-block px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
-                            Перейти к AI Агенту →
-                        </Link>
-                    </div>
-                )}
-            </div>
-
-            {/* Column Analysis Section */}
-            {columns.length > 0 && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 overflow-hidden">
-                <div className="p-6 border-b border-gray-200/50 bg-gradient-to-r from-green-50 to-emerald-50">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl"><BarChart3 className="w-6 h-6 text-white" /></div>
-                        <div><h2 className="text-xl font-semibold text-gray-800">Анализ столбцов</h2><p className="text-gray-600">Обзор структуры данных</p></div>
-                    </div>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50/80">
-                            <tr>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Столбец</th>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Тип данных</th>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Пустые значения</th>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Уникальные</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200/50">
-                            {columns.map((col) => (
-                            <tr key={col.column} className="hover:bg-gray-50/50">
-                                <td className="px-6 py-4 font-medium text-gray-900">{col.column}</td>
-                                <td className="px-6 py-4"><div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${getTypeColor(col.dtype)}`}>{getTypeIcon(col.dtype)} {col.dtype}</div></td>
-                                <td className="px-6 py-4"><div className={`flex items-center gap-2 ${col.nulls > 0 ? "text-amber-700" : "text-green-700"}`}>{col.nulls > 0 ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : <CheckCircle2 className="w-4 h-4 text-green-500" />} {col.nulls}</div></td>
-                                <td className="px-6 py-4 text-gray-900">{col.unique}</td>
-                            </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            )}
-
-            {/* Missing Values Imputation Section */}
-            {columns.length > 0 && columns.some(col => col.nulls > 0) && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><Zap className="w-6 h-6 text-white" /></div>
-                    <div><h2 className="text-xl font-semibold text-gray-800">Заполнение пропусков с TabPFN</h2><p className="text-gray-600">Выберите столбцы для интеллектуального заполнения</p></div>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {columns.filter((col) => col.nulls > 0).map((col) => (
-                    <label key={col.column} className="relative">
-                        <input type="checkbox" value={col.column} checked={selectedMissingCols.includes(col.column)}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setSelectedMissingCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
-                            }} className="sr-only" />
-                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedMissingCols.includes(col.column) ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                            <div className="font-medium text-gray-900">{col.column}</div>
-                            <div className="text-sm text-amber-600">{col.nulls} пропусков</div>
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <aside className="lg:col-span-1">
+                    <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6 sticky top-28">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-gradient-to-r from-gray-500 to-gray-700 rounded-xl"><History className="w-6 h-6 text-white" /></div>
+                            <h2 className="text-xl font-semibold text-gray-800">Ваши файлы</h2>
                         </div>
-                    </label>
-                    ))}
-                </div>
-                <button onClick={handleImpute} disabled={isImputing || selectedMissingCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
-                    {isImputing ? <><Loader className="w-5 h-5 animate-spin" /><span>Заполнение...</span></> : "Заполнить пропуски"}
-                </button>
-            </div>
-            )}
-
-            {/* Imputation Results Section */}
-            {imputationResult && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
-                <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
-                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><TrendingUp className="w-6 h-6 text-white" /></div>
-                    <div><h2 className="text-xl font-semibold text-purple-800">Результаты заполнения</h2><p className="text-purple-600">Статистика обработки</p></div></div>
-                </div>
-                <div className="p-6">
-                    {/* ... (таблица с результатами импутации, как в вашем файле) ... */}
-                </div>
-            </div>
-            )}
-
-            {/* Outlier Detection Section */}
-            {columns.length > 0 && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
-                 <div className="flex items-center gap-3 mb-6">
-                    <div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><Filter className="w-6 h-6 text-white" /></div>
-                    <div><h2 className="text-xl font-semibold text-gray-800">Поиск выбросов</h2><p className="text-gray-600">Выберите числовые столбцы для анализа</p></div>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {columns.filter((col) => col.dtype === "int64" || col.dtype === "float64").map((col) => (
-                    <label key={col.column} className="relative">
-                        <input type="checkbox" value={col.column} checked={selectedOutlierCols.includes(col.column)}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setSelectedOutlierCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
-                            }} className="sr-only" />
-                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedOutlierCols.includes(col.column) ? "border-red-500 bg-red-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                            <div className="font-medium text-gray-900">{col.column}</div>
-                            <div className="text-sm text-gray-500">{col.unique} уникальных</div>
+                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                            {userFiles.length > 0 ? userFiles.map(f => (
+                                <button
+                                    key={f.file_uid}
+                                    onClick={() => handleSelectFile(f.file_uid, f.file_name)}
+                                    className={`w-full text-left p-3 rounded-lg transition-colors flex items-start gap-3 ${fileId === f.file_uid ? 'bg-blue-100 border-blue-300' : 'bg-gray-50 hover:bg-gray-100'}`}
+                                >
+                                    <FileClock className="w-5 h-5 text-gray-500 mt-0.5 flex-shrink-0" />
+                                    <div>
+                                        <p className="font-medium text-gray-800 break-all">{f.file_name}</p>
+                                        <p className="text-xs text-gray-500">{format(new Date(f.datetime_created), 'dd.MM.yyyy HH:mm')}</p>
+                                    </div>
+                                </button>
+                            )) : (
+                                <p className="text-sm text-gray-500 text-center py-4">Вы еще не загружали файлы.</p>
+                            )}
                         </div>
-                    </label>
-                ))}
-                </div>
-                <button onClick={handleDetectOutliers} disabled={isAnalyzing || selectedOutlierCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
-                    {isAnalyzing ? <><Loader className="w-5 h-5 animate-spin" /><span>Анализ...</span></> : "Найти выбросы"}
-                </button>
-            </div>
-            )}
+                    </div>
+                </aside>
 
-            {/* Outliers Results Section */}
-            {outlierCount !== null && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-red-200/50 overflow-hidden">
-                <div className="p-6 border-b border-red-200/50 bg-gradient-to-r from-red-50 to-pink-50">
-                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><AlertTriangle className="w-6 h-6 text-white" /></div>
-                    <div><h2 className="text-xl font-semibold text-red-800">Обнаружено выбросов: {outlierCount}</h2><p className="text-red-600">Аномальные значения в данных</p></div></div>
-                </div>
-                {outliers.length > 0 ? (
-                    <div className="overflow-x-auto"><table className="w-full">
-                        <thead className="bg-red-50/80"><tr>{Object.keys(outliers[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-red-700">{key}</th>)}</tr></thead>
-                        <tbody className="divide-y divide-red-200/50">{outliers.map((row, idx) => (<tr key={idx}>{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-red-900">{String(val)}</td>)}</tr>))}</tbody>
-                    </table></div>
-                ) : <div className="p-6 text-center text-gray-600">Выбросы не найдены в выбранных столбцах.</div>}
-            </div>
-            )}
+                {/* --- ОСНОВНОЙ КОНТЕНТ --- */}
+                <main className="lg:col-span-3 space-y-8">
+                    {/* Upload Section */}
+                    <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-8">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="p-3 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl"><Upload className="w-6 h-6 text-white" /></div>
+                            <div><h2 className="text-xl font-semibold text-gray-800">1. Загрузка и выбор данных</h2><p className="text-gray-600">Загрузите новый CSV файл или выберите существующий слева</p></div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <label htmlFor="file-upload" className="flex items-center gap-2 px-6 py-3 bg-white border-2 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
+                                <FileText className="text-gray-600" /> <span className="text-gray-700 font-medium">{file ? file.name : "Выбрать файл"}</span>
+                                <input id="file-upload" type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
+                            </label>
+                            <button onClick={handleUpload} disabled={!file || isLoading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
+                                {isLoading ? <><Loader className="w-5 h-5 animate-spin" /><span>Загрузка...</span></> : <><Upload className="w-5 h-5" /><span>Загрузить</span></>}
+                            </button>
+                        </div>
+                        {error && <p className="mt-4 text-red-600 bg-red-100 p-3 rounded-lg">{error}</p>}
+                        {fileId && (
+                            <div className="mt-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+                                <h3 className="font-semibold text-indigo-800">Файл "{file?.name}" готов к анализу!</h3>
+                                <p className="text-indigo-700 mt-1">Теперь вы можете использовать инструменты ниже или перейти к диалогу с AI-агентом.</p>
+                                <Link to="/chat" className="mt-3 inline-block px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
+                                    Перейти к AI Агенту →
+                                </Link>
+                            </div>
+                        )}
+                    </div>
 
-            {/* Data Preview Section */}
-            {preview.length > 0 && (
-                <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 overflow-hidden">
-                    <div className="p-6 border-b border-gray-200/50"><h2 className="text-xl font-semibold text-gray-800">Предпросмотр данных</h2></div>
-                    <div className="overflow-x-auto"><table className="w-full">
-                        <thead className="bg-gray-50/80"><tr>{Object.keys(preview[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">{key}</th>)}</tr></thead>
-                        <tbody className="divide-y divide-gray-200/50">{preview.map((row, idx) => (<tr key={idx} className="hover:bg-gray-50/50">{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-gray-800">{String(val)}</td>)}</tr>))}</tbody>
-                    </table></div>
-                </div>
-            )}
+                    {/* Сообщение-приветствие, если файл не выбран */}
+                    {!fileId && (
+                        <div className="text-center py-16 px-6 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
+                            <Database className="w-16 h-16 mx-auto text-gray-300" />
+                            <h2 className="mt-4 text-2xl font-semibold text-gray-800">Начните работу</h2>
+                            <p className="mt-2 text-gray-500">Загрузите новый файл или выберите один из ранее загруженных в панели слева.</p>
+                        </div>
+                    )}
 
-            {/* Download Section */}
-            {fileId && (
-            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
-                <h2 className="text-xl font-semibold mb-2">Скачать обработанный файл</h2>
-                <p className="text-sm text-gray-600 mb-4">Будет скачана последняя сохраненная на сервере версия файла. Убедитесь, что вы применили все необходимые операции по очистке.</p>
-                <button onClick={handleDownload} className="px-6 py-3 bg-green-600 text-white rounded-xl font-medium">
-                    Скачать файл
-                </button>
+                    {/* Все остальные секции анализа, которые показываются только если есть fileId */}
+                    {fileId && (
+                        <>
+                            {/* Column Analysis Section */}
+                            {columns.length > 0 && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 overflow-hidden">
+                                <div className="p-6 border-b border-gray-200/50 bg-gradient-to-r from-green-50 to-emerald-50">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl"><BarChart3 className="w-6 h-6 text-white" /></div>
+                                        <div><h2 className="text-xl font-semibold text-gray-800">Анализ столбцов</h2><p className="text-gray-600">Обзор структуры данных</p></div>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                        <thead className="bg-gray-50/80">
+                                            <tr>
+                                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Столбец</th>
+                                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Тип данных</th>
+                                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Пустые значения</th>
+                                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Уникальные</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200/50">
+                                            {columns.map((col) => (
+                                            <tr key={col.column} className="hover:bg-gray-50/50">
+                                                <td className="px-6 py-4 font-medium text-gray-900">{col.column}</td>
+                                                <td className="px-6 py-4"><div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${getTypeColor(col.dtype)}`}>{getTypeIcon(col.dtype)} {col.dtype}</div></td>
+                                                <td className="px-6 py-4"><div className={`flex items-center gap-2 ${col.nulls > 0 ? "text-amber-700" : "text-green-700"}`}>{col.nulls > 0 ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : <CheckCircle2 className="w-4 h-4 text-green-500" />} {col.nulls}</div></td>
+                                                <td className="px-6 py-4 text-gray-900">{col.unique}</td>
+                                            </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            )}
+
+                            {/* Missing Values Imputation Section */}
+                            {columns.length > 0 && columns.some(col => col.nulls > 0) && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
+                                <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><Zap className="w-6 h-6 text-white" /></div>
+                                    <div><h2 className="text-xl font-semibold text-gray-800">Заполнение пропусков с TabPFN</h2><p className="text-gray-600">Выберите столбцы для интеллектуального заполнения</p></div>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {columns.filter((col) => col.nulls > 0).map((col) => (
+                                    <label key={col.column} className="relative">
+                                        <input type="checkbox" value={col.column} checked={selectedMissingCols.includes(col.column)}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setSelectedMissingCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
+                                            }} className="sr-only" />
+                                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedMissingCols.includes(col.column) ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+                                            <div className="font-medium text-gray-900">{col.column}</div>
+                                            <div className="text-sm text-amber-600">{col.nulls} пропусков</div>
+                                        </div>
+                                    </label>
+                                    ))}
+                                </div>
+                                <button onClick={handleImpute} disabled={isImputing || selectedMissingCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
+                                    {isImputing ? <><Loader className="w-5 h-5 animate-spin" /><span>Заполнение...</span></> : "Заполнить пропуски"}
+                                </button>
+                            </div>
+                            )}
+
+                            {/* Imputation Results Section */}
+                            {imputationResult && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
+                                <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
+                                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><TrendingUp className="w-6 h-6 text-white" /></div>
+                                    <div><h2 className="text-xl font-semibold text-purple-800">Результаты заполнения</h2><p className="text-purple-600">Статистика обработки</p></div></div>
+                                </div>
+                                <div className="p-6">
+                                    {/* Здесь можно добавить таблицу с результатами импутации */}
+                                </div>
+                            </div>
+                            )}
+
+                            {/* Outlier Detection Section */}
+                            {columns.length > 0 && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
+                                 <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><Filter className="w-6 h-6 text-white" /></div>
+                                    <div><h2 className="text-xl font-semibold text-gray-800">Поиск выбросов</h2><p className="text-gray-600">Выберите числовые столбцы для анализа</p></div>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {columns.filter((col) => col.dtype === "int64" || col.dtype === "float64").map((col) => (
+                                    <label key={col.column} className="relative">
+                                        <input type="checkbox" value={col.column} checked={selectedOutlierCols.includes(col.column)}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setSelectedOutlierCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
+                                            }} className="sr-only" />
+                                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedOutlierCols.includes(col.column) ? "border-red-500 bg-red-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+                                            <div className="font-medium text-gray-900">{col.column}</div>
+                                            <div className="text-sm text-gray-500">{col.unique} уникальных</div>
+                                        </div>
+                                    </label>
+                                ))}
+                                </div>
+                                <button onClick={handleDetectOutliers} disabled={isAnalyzing || selectedOutlierCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
+                                    {isAnalyzing ? <><Loader className="w-5 h-5 animate-spin" /><span>Анализ...</span></> : "Найти выбросы"}
+                                </button>
+                            </div>
+                            )}
+
+                            {/* Outliers Results Section */}
+                            {outlierCount !== null && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-red-200/50 overflow-hidden">
+                                <div className="p-6 border-b border-red-200/50 bg-gradient-to-r from-red-50 to-pink-50">
+                                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><AlertTriangle className="w-6 h-6 text-white" /></div>
+                                    <div><h2 className="text-xl font-semibold text-red-800">Обнаружено выбросов: {outlierCount}</h2><p className="text-red-600">Аномальные значения в данных</p></div></div>
+                                </div>
+                                {outliers.length > 0 ? (
+                                    <div className="overflow-x-auto"><table className="w-full">
+                                        <thead className="bg-red-50/80"><tr>{Object.keys(outliers[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-red-700">{key}</th>)}</tr></thead>
+                                        <tbody className="divide-y divide-red-200/50">{outliers.map((row, idx) => (<tr key={idx}>{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-red-900">{String(val)}</td>)}</tr>))}</tbody>
+                                    </table></div>
+                                ) : <div className="p-6 text-center text-gray-600">Выбросы не найдены в выбранных столбцах.</div>}
+                            </div>
+                            )}
+
+                            {/* Data Preview Section */}
+                            {preview.length > 0 && (
+                                <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 overflow-hidden">
+                                    <div className="p-6 border-b border-gray-200/50"><h2 className="text-xl font-semibold text-gray-800">Предпросмотр данных</h2></div>
+                                    <div className="overflow-x-auto"><table className="w-full">
+                                        <thead className="bg-gray-50/80"><tr>{Object.keys(preview[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">{key}</th>)}</tr></thead>
+                                        <tbody className="divide-y divide-gray-200/50">{preview.map((row, idx) => (<tr key={idx} className="hover:bg-gray-50/50">{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-gray-800">{String(val)}</td>)}</tr>))}</tbody>
+                                    </table></div>
+                                </div>
+                            )}
+
+                            {/* Download Section */}
+                            {fileId && (
+                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
+                                <h2 className="text-xl font-semibold mb-2">Скачать обработанный файл</h2>
+                                <p className="text-sm text-gray-600 mb-4">Будет скачана последняя сохраненная на сервере версия файла. Убедитесь, что вы применили все необходимые операции по очистке.</p>
+                                <button onClick={handleDownload} className="px-6 py-3 bg-green-600 text-white rounded-xl font-medium">
+                                    Скачать файл
+                                </button>
+                            </div>
+                            )}
+                        </>
+                    )}
+                </main>
             </div>
-            )}
         </div>
     );
 };

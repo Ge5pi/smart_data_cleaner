@@ -11,52 +11,60 @@ type ChatMessage = {
 };
 
 const ChatPage = () => {
-  // --- ИСПРАВЛЕНИЕ 1: Получаем токен из контекста ---
+  // Получаем всё необходимое из контекста
   const { fileId, sessionId, setSessionId, token } = useContext(AppContext)!;
   const navigate = useNavigate();
 
+  // Локальное состояние компонента
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [currentQuery, setCurrentQuery] = useState("");
   const [isReplying, setIsReplying] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [activeSessionFileId, setActiveSessionFileId] = useState<string | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Этот хук отвечает за автоматический старт сессии
+  // Основной хук, который теперь реагирует на смену fileId
   useEffect(() => {
+    // 1. Если пользователь как-то попал на страницу без выбранного файла, отправляем его обратно.
     if (!fileId) {
-      alert("Пожалуйста, сначала загрузите файл на главной странице.");
+      alert("Пожалуйста, сначала выберите файл на главной странице.");
       navigate('/');
       return;
     }
 
-    // --- ИСПРАВЛЕНИЕ 2: Проверяем наличие токена перед запросом ---
-    if (fileId && token && !sessionId) {
+    // 2. ГЛАВНОЕ УСЛОВИЕ: Если глобальный fileId изменился (и не совпадает с ID файла нашей активной сессии),
+    //    ИЛИ если сессия еще не была начата (sessionId is null) - запускаем новую сессию.
+    if (token && fileId && (fileId !== activeSessionFileId || !sessionId)) {
       setIsSessionLoading(true);
       setError(null);
+      setChatHistory([]); // Очищаем историю старого чата
+
       const sessionFormData = new FormData();
       sessionFormData.append("file_id", fileId);
 
-      // --- ИСПРАВЛЕНИЕ 3: Добавляем заголовок авторизации ---
       axios.post("http://localhost:5643/sessions/start", sessionFormData, {
-          headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(res => {
-          setSessionId(res.data.session_id);
-          setChatHistory([{ role: 'assistant', content: `Сессия **${res.data.session_id}** успешно начата. Я готов к анализу. Что бы вы хотели узнать?` }]);
+          const newSessionId = res.data.session_id;
+          setSessionId(newSessionId); // Обновляем глобальный sessionId
+          setActiveSessionFileId(fileId); // "Запоминаем", для какого файла мы начали сессию
+          setChatHistory([{ role: 'assistant', content: `Сессия для файла успешно начата. Я готов к анализу. Что бы вы хотели узнать?` }]);
         })
         .catch(err => {
             console.error("Ошибка старта сессии", err);
-            if (err.response && err.response.status === 401) {
-              setError("Ошибка авторизации. Попробуйте войти заново.");
-            } else {
-              setError("Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и загрузить файл заново.");
-            }
+            setError("Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и выбрать файл заново.");
+            setSessionId(null); // Сбрасываем ID сессии при ошибке
+            setActiveSessionFileId(null);
         })
         .finally(() => setIsSessionLoading(false));
     }
-  }, [fileId, sessionId, navigate, setSessionId, token]); // Добавили token в зависимости
+  }, [fileId, token, sessionId, activeSessionFileId, navigate, setSessionId]); // <-- Зависимости хука
+
+  // --- КОНЕЦ КЛЮЧЕВЫХ ИЗМЕНЕНИЙ ---
 
   // Авто-прокрутка чата вниз
   useEffect(() => {
@@ -78,28 +86,24 @@ const ChatPage = () => {
     formData.append("query", queryToSend);
 
     try {
-      // --- ИСПРАВЛЕНИЕ 4: Добавляем заголовок авторизации ---
       const res = await axios.post("http://localhost:5643/sessions/ask", formData, {
           headers: { 'Authorization': `Bearer ${token}` }
       });
       setChatHistory(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      const errorMsg = err.response && err.response.status === 401
-        ? "Ошибка авторизации. Ваша сессия истекла."
-        : "Произошла ошибка при обработке вашего запроса.";
-      setChatHistory(prev => [...prev, { role: 'assistant', content: errorMsg }]);
+      setChatHistory(prev => [...prev, { role: 'assistant', content: "Произошла ошибка при обработке вашего запроса." }]);
     } finally {
       setIsReplying(false);
     }
   };
 
   if (isSessionLoading) {
-    return <div className="flex justify-center items-center h-64 text-lg font-medium text-gray-600"><Loader className="animate-spin mr-4" /> Запускаем сессию AI-агента...</div>;
+    return <div className="flex justify-center items-center h-64 text-lg font-medium text-gray-600"><Loader className="animate-spin mr-4" /> Перезапускаем сессию для нового файла...</div>;
   }
 
-  if (!fileId) {
-      return null;
+  if (!fileId || !sessionId) {
+      return <div className="flex justify-center items-center h-64 text-lg font-medium text-gray-600">Ожидание начала сессии...</div>;
   }
 
   return (

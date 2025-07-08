@@ -30,6 +30,11 @@ def get_files_by_user_id(db: Session, user_id: int):
         .all()
 
 
+def get_all_files(db: Session):
+    """Возвращает абсолютно все файлы из базы данных."""
+    return db.query(models.File).all()
+
+
 def create_user_file(db: Session, user_id: int, file_uid: str, file_name: str) -> models.File:
     db_file = models.File(
         user_id=user_id,

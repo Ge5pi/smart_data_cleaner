@@ -43,27 +43,53 @@ const DataCleanerPage = () => {
     };
 
     const handleUpload = async () => {
-        if (!file) return;
-        setIsLoading(true);
-        setError(null);
-        const uploadFormData = new FormData();
-        uploadFormData.append("file", file);
-        try {
-            const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData);
-            const newFileId = uploadRes.data.file_id;
-            setFileId(newFileId);
-            setPreview(uploadRes.data.preview);
-            const analysisFormData = new FormData();
-            analysisFormData.append("file_id", newFileId);
-            const analysisRes = await axios.post("http://localhost:5643/analyze/", analysisFormData);
-            setColumns(analysisRes.data.columns);
-        } catch (err) {
-            console.error(err);
+    if (!file) return;
+    setIsLoading(true);
+    setError(null);
+
+    // --- ИСПРАВЛЕНИЕ ---
+    // Используем правильный ключ 'authToken' вместо 'soda_token'
+    const token = localStorage.getItem('authToken');
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+    if (!token) {
+        setError("Ошибка аутентификации: токен не найден. Пожалуйста, войдите в систему заново.");
+        setIsLoading(false);
+        return;
+    }
+
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
+
+    try {
+        const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const newFileId = uploadRes.data.file_id;
+        setFileId(newFileId);
+        setPreview(uploadRes.data.preview);
+
+        const analysisFormData = new FormData();
+        analysisFormData.append("file_id", newFileId);
+
+        // Примечание: этот запрос не отправляет токен. Если эндпоинт /analyze/ защищен,
+        // сюда также нужно будет добавить headers с токеном.
+        const analysisRes = await axios.post("http://localhost:5643/analyze/", analysisFormData);
+        setColumns(analysisRes.data.columns);
+
+    } catch (err: any) {
+        console.error(err);
+        if (err.response && err.response.status === 401) {
+            setError("Ошибка авторизации. Ваша сессия могла истечь. Пожалуйста, войдите заново.");
+        } else {
             setError("Не удалось загрузить или проанализировать файл.");
-        } finally {
-            setIsLoading(false);
         }
-    };
+    } finally {
+        setIsLoading(false);
+    }
+};
 
     const handleImpute = async () => {
         if (!fileId || selectedMissingCols.length === 0) return;

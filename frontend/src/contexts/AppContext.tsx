@@ -44,7 +44,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [file, setFile] = useState<File | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-
+  const [isAuthCheckComplete, setIsAuthCheckComplete] = useState(false);
   const [columns, setColumns] = useState<ColumnAnalysis[]>([]);
   const [preview, setPreview] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +69,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
                 localStorage.removeItem('authToken');
             }
         }
+        setIsAuthCheckComplete(true);
   }, []);
 
   const login = (newToken: string) => {
@@ -114,7 +115,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     token,
     user,
     login,
-    logout
+    logout,
+    isAuthCheckComplete
   };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

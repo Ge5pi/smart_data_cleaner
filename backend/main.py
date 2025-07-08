@@ -76,6 +76,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_d
     new_user = crud.create_user(db=db, user=user)
     return new_user
 
+
 @user_router.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     # authenticate_user будет искать юзера по email (form_data.username) и проверять пароль
@@ -113,6 +114,7 @@ async def start_session(file_id: str = Form(...), current_user: models.User = De
     }
     return {"session_id": session_id, "message": "Сессия успешно начата."}
 
+
 app.include_router(user_router)
 
 
@@ -131,7 +133,6 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
 
 
 def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
-    # ... (Ваш код функции impute_missing_values_with_tabpfn без изменений)
     df_work = df.copy()
     if not df_work[target_column].isna().any():
         return df_work[target_column]
@@ -184,10 +185,6 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
     except Exception:
         return df_work[target_column]
 
-
-# ==============================================================================
-# 3. НОВЫЙ МОДУЛЬ ОЦЕНКИ И УЛУЧШЕНИЯ ОТВЕТА
-# ==============================================================================
 
 def get_critic_evaluation(query: str, answer: str) -> dict:
     """Вызывает модель-критика для оценки ответа."""
@@ -404,11 +401,22 @@ available_functions = {
 # ==============================================================================
 
 @app.post("/upload/")
-async def upload_csv(file: UploadFile = File(...)):
-    """Загружает CSV, сохраняет его и индексирует для RAG."""
-    # ... (Ваш код эндпоинта /upload/ без изменений)
+async def upload_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
     file_id = str(uuid.uuid4())
     output_path = TEMP_DIR / f"{file_id}.csv"
+
+    original_filename = file.filename
+
+    crud.create_user_file(
+        db=db,
+        user_id=current_user.id,
+        file_uid=file_id,
+        file_name=original_filename
+    )
 
     df = pd.read_csv(file.file, encoding="utf-8")
     df = df.replace([np.inf, -np.inf], np.nan)

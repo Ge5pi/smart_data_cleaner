@@ -11,7 +11,8 @@ type ChatMessage = {
 };
 
 const ChatPage = () => {
-  const { fileId, sessionId, setSessionId } = useContext(AppContext)!;
+  // --- ИСПРАВЛЕНИЕ 1: Получаем токен из контекста ---
+  const { fileId, sessionId, setSessionId, token } = useContext(AppContext)!;
   const navigate = useNavigate();
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -24,31 +25,38 @@ const ChatPage = () => {
 
   // Этот хук отвечает за автоматический старт сессии
   useEffect(() => {
-    // Если пользователь попал сюда без загруженного файла, возвращаем его на главную
     if (!fileId) {
       alert("Пожалуйста, сначала загрузите файл на главной странице.");
       navigate('/');
       return;
     }
-    // АВТОЗАПОЛНЕНИЕ: Если есть fileId, но еще нет sessionId, запускаем сессию
-    if (fileId && !sessionId) {
+
+    // --- ИСПРАВЛЕНИЕ 2: Проверяем наличие токена перед запросом ---
+    if (fileId && token && !sessionId) {
       setIsSessionLoading(true);
       setError(null);
       const sessionFormData = new FormData();
       sessionFormData.append("file_id", fileId);
 
-      axios.post("http://localhost:5643/sessions/start", sessionFormData)
+      // --- ИСПРАВЛЕНИЕ 3: Добавляем заголовок авторизации ---
+      axios.post("http://localhost:5643/sessions/start", sessionFormData, {
+          headers: { 'Authorization': `Bearer ${token}` }
+      })
         .then(res => {
-          setSessionId(res.data.session_id); // Сохраняем ID сессии в глобальный контекст
+          setSessionId(res.data.session_id);
           setChatHistory([{ role: 'assistant', content: `Сессия **${res.data.session_id}** успешно начата. Я готов к анализу. Что бы вы хотели узнать?` }]);
         })
         .catch(err => {
             console.error("Ошибка старта сессии", err);
-            setError("Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и загрузить файл заново.");
+            if (err.response && err.response.status === 401) {
+              setError("Ошибка авторизации. Попробуйте войти заново.");
+            } else {
+              setError("Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и загрузить файл заново.");
+            }
         })
         .finally(() => setIsSessionLoading(false));
     }
-  }, [fileId, sessionId, navigate, setSessionId]);
+  }, [fileId, sessionId, navigate, setSessionId, token]); // Добавили token в зависимости
 
   // Авто-прокрутка чата вниз
   useEffect(() => {
@@ -56,7 +64,7 @@ const ChatPage = () => {
   }, [chatHistory]);
 
   const handleSendQuery = async () => {
-    if (!currentQuery.trim() || !sessionId || isReplying) return;
+    if (!currentQuery.trim() || !sessionId || isReplying || !token) return;
 
     const userMessage: ChatMessage = { role: 'user', content: currentQuery };
     setChatHistory(prev => [...prev, userMessage]);
@@ -70,11 +78,17 @@ const ChatPage = () => {
     formData.append("query", queryToSend);
 
     try {
-      const res = await axios.post("http://localhost:5643/sessions/ask", formData);
+      // --- ИСПРАВЛЕНИЕ 4: Добавляем заголовок авторизации ---
+      const res = await axios.post("http://localhost:5643/sessions/ask", formData, {
+          headers: { 'Authorization': `Bearer ${token}` }
+      });
       setChatHistory(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setChatHistory(prev => [...prev, { role: 'assistant', content: "Произошла ошибка при обработке вашего запроса." }]);
+      const errorMsg = err.response && err.response.status === 401
+        ? "Ошибка авторизации. Ваша сессия истекла."
+        : "Произошла ошибка при обработке вашего запроса.";
+      setChatHistory(prev => [...prev, { role: 'assistant', content: errorMsg }]);
     } finally {
       setIsReplying(false);
     }
@@ -85,7 +99,6 @@ const ChatPage = () => {
   }
 
   if (!fileId) {
-      // Это нужно, чтобы компонент ничего не рендерил во время редиректа
       return null;
   }
 

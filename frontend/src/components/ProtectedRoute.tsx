@@ -3,15 +3,15 @@ import { Navigate, useLocation, Outlet } from 'react-router-dom';
 import { AppContext } from '../contexts/AppContext';
 
 const ProtectedRoute = () => {
-  const { token, isLoading } = useContext(AppContext)!;
+  const { token, isAuthCheckComplete } = useContext(AppContext)!;
   const location = useLocation();
-  if (isLoading) {
-    return <div>Проверка авторизации...</div>;
-  }
-  if (token) {
+  if (!isAuthCheckComplete) {
     return <Outlet />;
   }
-  return <Navigate to="/login" state={{ from: location }} replace />;
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  return <Outlet />;
 };
 
 export default ProtectedRoute;

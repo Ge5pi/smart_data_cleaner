@@ -5,7 +5,8 @@ import { AppProvider } from './contexts/AppContext';
 
 // Компоненты и страницы
 import Layout from './components/Layout';
-import ProtectedRoute from './components/ProtectedRoute'; // <-- Импортируем нашего стражника
+import ProtectedRoute from './components/ProtectedRoute';
+import ChartsPage from './pages/ChartsPage';
 import DataCleanerPage from './pages/DataCleanerPage';
 import ChatPage from './pages/ChatPage';
 import RegistrationPage from './pages/RegistrationPage';
@@ -21,7 +22,7 @@ function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<DataCleanerPage />} />
             <Route path="chat" element={<ChatPage />} />
-
+            <Route path="charts" element={<ChartsPage />} />
           </Route>
         </Route>
 

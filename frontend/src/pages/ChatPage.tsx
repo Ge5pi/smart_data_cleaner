@@ -11,11 +11,8 @@ type ChatMessage = {
 };
 
 const ChatPage = () => {
-  // Получаем всё необходимое из контекста
   const { fileId, sessionId, setSessionId, token } = useContext(AppContext)!;
   const navigate = useNavigate();
-
-  // Локальное состояние компонента
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [currentQuery, setCurrentQuery] = useState("");
   const [isReplying, setIsReplying] = useState(false);
@@ -25,22 +22,16 @@ const ChatPage = () => {
   const [activeSessionFileId, setActiveSessionFileId] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Основной хук, который теперь реагирует на смену fileId
   useEffect(() => {
-    // 1. Если пользователь как-то попал на страницу без выбранного файла, отправляем его обратно.
     if (!fileId) {
       alert("Пожалуйста, сначала выберите файл на главной странице.");
       navigate('/');
       return;
     }
-
-    // 2. ГЛАВНОЕ УСЛОВИЕ: Если глобальный fileId изменился (и не совпадает с ID файла нашей активной сессии),
-    //    ИЛИ если сессия еще не была начата (sessionId is null) - запускаем новую сессию.
     if (token && fileId && (fileId !== activeSessionFileId || !sessionId)) {
       setIsSessionLoading(true);
       setError(null);
-      setChatHistory([]); // Очищаем историю старого чата
+      setChatHistory([]);
 
       const sessionFormData = new FormData();
       sessionFormData.append("file_id", fileId);
@@ -50,8 +41,8 @@ const ChatPage = () => {
       })
         .then(res => {
           const newSessionId = res.data.session_id;
-          setSessionId(newSessionId); // Обновляем глобальный sessionId
-          setActiveSessionFileId(fileId); // "Запоминаем", для какого файла мы начали сессию
+          setSessionId(newSessionId);
+          setActiveSessionFileId(fileId);
           setChatHistory([{ role: 'assistant', content: `Сессия для файла успешно начата. Я готов к анализу. Что бы вы хотели узнать?` }]);
         })
         .catch(err => {
@@ -62,11 +53,7 @@ const ChatPage = () => {
         })
         .finally(() => setIsSessionLoading(false));
     }
-  }, [fileId, token, sessionId, activeSessionFileId, navigate, setSessionId]); // <-- Зависимости хука
-
-  // --- КОНЕЦ КЛЮЧЕВЫХ ИЗМЕНЕНИЙ ---
-
-  // Авто-прокрутка чата вниз
+  }, [fileId, token, sessionId, activeSessionFileId, navigate, setSessionId]);
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory]);

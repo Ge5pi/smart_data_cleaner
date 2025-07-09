@@ -28,9 +28,6 @@ from fastapi import APIRouter
 from datetime import timedelta
 import auth
 
-# ==============================================================================
-# 1. КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
-# ==============================================================================
 
 api_key = API_KEY
 pinecone_key = PINECONE_KEY
@@ -38,18 +35,13 @@ pinecone_key = PINECONE_KEY
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Код, который выполняется при старте сервера ---
     print("--- Populating file metadata cache on startup ---")
-    # Используем 'with' для корректного закрытия сессии
     with database.SessionLocal() as db:
         try:
-            # Убедитесь, что функция get_all_files существует в crud.py
             all_files_from_db = crud.get_all_files(db)
             for file_record in all_files_from_db:
                 file_id = file_record.file_uid
                 output_path = TEMP_DIR / f"{file_id}.csv"
-
-                # Добавляем в кэш, только если файл физически существует
                 if output_path.exists():
                     file_metadata_storage[file_id] = {
                         "file_path": str(output_path),
@@ -63,7 +55,6 @@ async def lifespan(app: FastAPI):
 
     print("--- Cache population complete. Application is ready. ---")
     yield
-    # --- Код, который выполняется при остановке сервера ---
     file_metadata_storage.clear()
     print("--- Cleared file metadata cache on shutdown ---")
 
@@ -71,7 +62,6 @@ client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI()
 
-# Настройки моделей и констант
 EMBEDDING_MODEL = "text-embedding-3-small"
 AGENT_MODEL = "gpt-4o"
 CRITIC_MODEL = "gpt-4o"
@@ -80,17 +70,14 @@ BATCH_SIZE = 100
 
 user_router = APIRouter(lifespan=lifespan)
 
-# Настройка CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
-# Создание директории для временных файлов
 TEMP_DIR = Path("temp_cleaned_files")
 TEMP_DIR.mkdir(exist_ok=True)
 
-# Инициализация векторной базы данных Pinecone
 if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(name=INDEX_NAME, dimension=1536, metric='cosine')
 index = pc.Index(INDEX_NAME)
@@ -111,7 +98,6 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(database.get_d
 
 @user_router.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
-    # authenticate_user будет искать юзера по email (form_data.username) и проверять пароль
     user = auth.authenticate_user(db, email=form_data.username, password=form_data.password)
     if not user:
         raise HTTPException(
@@ -131,14 +117,11 @@ def read_user_files(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Возвращает список файлов для текущего пользователя."""
     return crud.get_files_by_user_id(db=db, user_id=current_user.id)
 
 
 @app.post("/sessions/start")
 async def start_session(file_id: str = Form(...), current_user: models.User = Depends(auth.get_current_active_user)):
-    # Теперь эта функция будет выполнена, только если пользователь предоставил валидный токен.
-    # Объект пользователя доступен в переменной current_user.
     print(f"Пользователь {current_user.email} (ID: {current_user.id}) начинает новую сессию.")
 
     if file_id not in file_metadata_storage:
@@ -150,17 +133,12 @@ async def start_session(file_id: str = Form(...), current_user: models.User = De
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
         "dataframe": df,
         "file_id": file_id,
-        "user_id": current_user.id  # Сохраняем ID пользователя в сессии
+        "user_id": current_user.id
     }
     return {"session_id": session_id, "message": "Сессия успешно начата."}
 
 
 app.include_router(user_router)
-
-
-# ==============================================================================
-# 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ИНСТРУМЕНТЫ ИЗ ОРИГИНАЛЬНОГО ФАЙЛА
-# ==============================================================================
 
 def format_row(row_index: int, row: pd.Series) -> str:
     return f"Row-{row_index + 1}: " + " | ".join([f"{col}: {row[col]}" for col in row.index])
@@ -227,7 +205,6 @@ def impute_missing_values_with_tabpfn(df, target_column, max_samples=1000):
 
 
 def get_critic_evaluation(query: str, answer: str) -> dict:
-    """Вызывает модель-критика для оценки ответа."""
     critic_prompt = f""" You are a meticulous AI data analyst critic. Your task is to evaluate a generated answer 
     based on a user's query. Provide your evaluation in a structured JSON format. 
 
@@ -264,7 +241,6 @@ def get_critic_evaluation(query: str, answer: str) -> dict:
 
 
 def get_refined_answer(history: list, original_answer: str, feedback: str, suggestion: str) -> str:
-    """Вызывает модель-улучшателя для исправления ответа."""
     refiner_prompt = f""" You are an expert data analyst. Your previous attempt to answer a user's question was 
     flawed. A critic has provided feedback. Your task is to generate a new, final, and correct answer that 
     incorporates this feedback. 
@@ -292,10 +268,6 @@ def get_refined_answer(history: list, original_answer: str, feedback: str, sugge
     return response.choices[0].message.content
 
 
-# ==============================================================================
-# 4. ЯДРО AI-АГЕНТА (Инструменты и определение)
-# ==============================================================================
-
 SYSTEM_PROMPT = """Ты — элитный AI-аналитик данных SODA (Strategic Operations & Data Analyst). Твоя работа — помогать 
 пользователю анализировать данные в pandas DataFrame `df`. 
 
@@ -317,7 +289,6 @@ markdown-таблица) и кратко объясни, что он означ�
 
 
 def execute_python_code(session_id: str, code: str) -> str:
-    """Выполняет Python-код, умеет захватывать результат последней строки."""
     print(f"TOOL (session: {session_id}): Выполнение кода:\n---\n{code}\n---")
     if session_id not in session_cache:
         return "Ошибка: Сессия не найдена."
@@ -345,7 +316,6 @@ def execute_python_code(session_id: str, code: str) -> str:
 
 
 def run_rag_pipeline(file_id: str, query: str) -> str:
-    # ... (Ваш код run_rag_pipeline без изменений)
     query_embedding = get_embeddings([query])[0]
     search_results = index.query(vector=query_embedding, top_k=7, filter={"file_id": file_id}, include_metadata=True)
     context = " "
@@ -362,10 +332,6 @@ def run_rag_pipeline(file_id: str, query: str) -> str:
 
 
 def save_dataframe_to_file(session_id: str) -> str:
-    """
-    Сохраняет текущее состояние DataFrame сессии обратно в исходный файл.
-    Перезаписывает файл на диске. Используется только по прямому указанию пользователя.
-    """
     print(f"TOOL (session: {session_id}): Сохранение файла...")
     if session_id not in session_cache:
         return "Ошибка: Сессия не найдена."
@@ -392,7 +358,6 @@ def save_dataframe_to_file(session_id: str) -> str:
 
 
 def answer_question_from_context(session_id: str, query: str) -> str:
-    """Инструмент-обертка для RAG."""
     print(f"TOOL (session: {session_id}): RAG-запрос: '{query}'")
     file_id = session_cache.get(session_id, {}).get("file_id")
     if not file_id:
@@ -435,11 +400,6 @@ available_functions = {
     "save_dataframe_to_file": save_dataframe_to_file,  # Регистрируем новый инструмент
 }
 
-
-# ==============================================================================
-# 5. ЭНДПОИНТЫ FastAPI
-# ==============================================================================
-
 @app.post("/upload/")
 async def upload_csv(
     file: UploadFile = File(...),
@@ -457,16 +417,13 @@ async def upload_csv(
         file_name=original_filename
     )
 
-    # Сохраняем файл на диск
     with open(output_path, "wb") as buffer:
         buffer.write(await file.read())
 
-    # Теперь читаем его для обработки
     df = pd.read_csv(output_path)
     df = df.replace([np.inf, -np.inf], np.nan)
-    df.to_csv(output_path, index=False) # Пересохраняем после обработки
+    df.to_csv(output_path, index=False)
 
-    # Обновляем кэш в памяти
     file_metadata_storage[file_id] = {
         "file_path": str(output_path),
         "file_name": original_filename,
@@ -500,8 +457,6 @@ async def upload_csv(
 
 @app.post("/sessions/start")
 async def start_session(file_id: str = Form(...)):
-    """Начинает новую аналитическую сессию."""
-    # ... (Ваш код эндпоинта /sessions/start без изменений)
     if file_id not in file_metadata_storage:
         raise HTTPException(status_code=404, detail="Файл с таким ID не найден.")
     session_id = str(uuid.uuid4())
@@ -515,7 +470,6 @@ async def start_session(file_id: str = Form(...)):
 
 @app.post("/sessions/ask")
 async def session_ask(session_id: str = Form(...), query: str = Form(...)):
-    """Задает вопрос в рамках сессии с новым циклом оценки и улучшения."""
     if session_id not in session_cache:
         raise HTTPException(status_code=404, detail="Сессия не найдена.")
     df = session_cache[session_id]["dataframe"]
@@ -566,11 +520,8 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"Произошла внутренняя ошибка: {str(e)}")
 
 
-# --- Ваши оригинальные эндпоинты для очистки ---
-
 @app.post("/analyze/")
 async def analyze_csv(file_id: str = Form(...)):
-    # ... (Ваш код эндпоинта /analyze/ без изменений)
     if file_id not in file_metadata_storage:
         raise HTTPException(status_code=404, detail="File not found.")
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
@@ -582,7 +533,6 @@ async def analyze_csv(file_id: str = Form(...)):
 
 @app.post("/impute-missing/")
 async def impute_missing_values(file_id: str = Form(...), columns: Optional[str] = Form(None)):
-    # ... (Ваш код эндпоинта /impute-missing/ без изменений)
     if file_id not in file_metadata_storage:
         raise HTTPException(status_code=404, detail="File not found.")
     df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
@@ -637,3 +587,62 @@ async def analyze_existing_file(file_id: str = Form(...)):
         return {"columns": analysis, "preview": preview_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read or analyze file: {str(e)}")
+
+
+@app.post("/chart-data/")
+async def get_chart_data(
+        file_id: str = Form(...),
+        chart_type: str = Form(...),
+        column1: str = Form(...),
+        column2: Optional[str] = Form(None),
+):
+    """Готовит данные для указанного типа графика."""
+    if file_id not in file_metadata_storage:
+        raise HTTPException(status_code=404, detail="Файл не найден в кэше сервера.")
+
+    file_path = file_metadata_storage[file_id]['file_path']
+    df = pd.read_csv(file_path)
+
+    chart_data = {}
+
+    try:
+
+        if chart_type == "histogram" or chart_type == "pie":
+            if df[column1].dtype == 'object':
+                counts = df[column1].dropna().value_counts().nlargest(15)
+            else:  # для чисел
+                counts = df[column1].dropna().value_counts()
+
+            chart_data = {
+                "labels": counts.index.astype(str).tolist(),
+                "values": counts.values.tolist(),
+            }
+
+        elif chart_type == "scatter" and column2:
+            # Для диаграммы рассеяния
+            scatter_df = df[[column1, column2]].dropna()
+            chart_data = {
+                "points": scatter_df.to_dict(orient='records')
+            }
+
+        elif chart_type == "line" and column2:
+            try:
+                df[column1] = pd.to_datetime(df[column1])
+                line_df = df[[column1, column2]].dropna().sort_values(by=column1)
+
+                chart_data = {
+                    "labels": line_df[column1].dt.strftime('%Y-%m-%d').tolist(),  # Форматируем даты
+                    "values": line_df[column2].tolist(),
+                }
+            except Exception:
+                raise HTTPException(status_code=400,
+                                    detail=f"Не удалось преобразовать столбец '{column1}' в дату. Выберите другой "
+                                           f"столбец для оси X.")
+
+        else:
+            raise HTTPException(status_code=400, detail="Неверный тип графика или нехватка данных.")
+
+        return {"chart_type": chart_type, "data": chart_data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при подготовке данных для графика: {str(e)}")

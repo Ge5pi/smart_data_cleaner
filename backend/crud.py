@@ -1,8 +1,10 @@
-# crud.py
-from sqlalchemy.orm import Session
-import models, schemas
-from passlib.context import CryptContext
 from datetime import datetime, timezone
+
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+
+import models
+import schemas
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -25,13 +27,11 @@ def create_user(db: Session, user: schemas.UserCreate):
 
 
 def get_files_by_user_id(db: Session, user_id: int):
-    """Возвращает все файлы, принадлежащие пользователю."""
     return db.query(models.File).filter(models.File.user_id == user_id).order_by(models.File.datetime_created.desc()) \
         .all()
 
 
 def get_all_files(db: Session):
-    """Возвращает абсолютно все файлы из базы данных."""
     return db.query(models.File).all()
 
 

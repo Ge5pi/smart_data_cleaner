@@ -1,20 +1,18 @@
 // src/components/Layout.tsx
 
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Database, BotMessageSquare, LogIn, UserPlus, LogOut } from 'lucide-react';
+// ИСПРАВЛЕНИЕ 1: Добавляем BarChartHorizontal в импорты
+import { Database, BotMessageSquare, LogIn, UserPlus, LogOut, BarChartHorizontal } from 'lucide-react';
 import { useContext } from 'react';
 import { AppContext } from '../contexts/AppContext';
 
 const Layout = () => {
-  // Получаем текущего пользователя и функцию logout из контекста
-  const { user, logout } = useContext(AppContext)!;
+  // ИСПРАВЛЕНИЕ 2: Извлекаем fileId из контекста вместе с user и logout
+  const { user, logout, fileId } = useContext(AppContext)!;
   const navigate = useNavigate();
 
-  // Создаем обработчик для кнопки выхода
   const handleLogout = () => {
-    // Вызываем функцию logout из контекста
     logout();
-    // Перенаправляем пользователя на страницу входа
     navigate('/login');
   };
 
@@ -36,20 +34,31 @@ const Layout = () => {
               <NavLink to="/" className={({ isActive }) => `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}>
                 Инструменты
               </NavLink>
-              <NavLink to="/chat" className={({ isActive }) => `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'} ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={(e) => !user && e.preventDefault()}
+
+              {/* УЛУЧШЕНИЕ: Ссылка на чат также должна быть неактивна без fileId */}
+              <NavLink
+                to="/chat"
+                className={({ isActive }) => `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'} ${!fileId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={(e) => !fileId && e.preventDefault()}
               >
                 <BotMessageSquare className="w-4 h-4" />
                 AI Агент
               </NavLink>
+
+              <NavLink
+                to="/charts"
+                className={({ isActive }) => `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-teal-100 text-teal-700' : 'text-gray-600 hover:bg-gray-100'} ${!fileId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={(e) => !fileId && e.preventDefault()}
+              >
+                <BarChartHorizontal className="w-4 h-4" />
+                Графики
+              </NavLink>
             </nav>
           </div>
 
-          {/* --- НАЧАЛО ИЗМЕНЕНИЙ --- */}
           {/* Правая часть: Статус пользователя */}
           <div className="flex items-center gap-4">
             {user ? (
-              // Если пользователь вошел в систему
               <>
                 <span className="text-sm text-gray-700">
                   Вы вошли как: <span className="font-semibold">{user.email}</span>
@@ -63,7 +72,6 @@ const Layout = () => {
                 </button>
               </>
             ) : (
-              // Если пользователь не вошел в систему
               <>
                 <NavLink to="/login" className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
                   <LogIn className="w-4 h-4" />
@@ -76,8 +84,6 @@ const Layout = () => {
               </>
             )}
           </div>
-          {/* --- КОНЕЦ ИЗМЕНЕНИЙ --- */}
-
         </div>
       </div>
       <main>

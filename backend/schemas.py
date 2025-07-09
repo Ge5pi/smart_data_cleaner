@@ -1,13 +1,9 @@
-# schemas.py
-
 from pydantic import BaseModel
 from datetime import datetime
 
-
-# Schemas for File model
 class FileBase(BaseModel):
     file_uid: str
-    file_name: str  # <-- Добавляем здесь
+    file_name: str
 
 
 class FileCreate(FileBase):
@@ -23,7 +19,6 @@ class File(FileBase):
         from_attributes = True
 
 
-# Schemas for User model
 class UserBase(BaseModel):
     email: str
 
@@ -35,7 +30,6 @@ class UserCreate(UserBase):
 class User(UserBase):
     id: int
     is_active: bool
-    # Теперь список файлов будет содержать и file_name
     files: list[File] = []
 
     class Config:

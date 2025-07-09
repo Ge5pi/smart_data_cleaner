@@ -57,14 +57,16 @@ const DataCleanerPage = () => {
         setError(null);
 
         // Создаем настоящий, но пустой объект File для консистентности типа в состоянии
-        const placeholderFile = new File([""], selectedFileName, { type: "text/csv" });
+        const placeholderFile = new File([""], selectedFileName, { type: "text/csv"});
         setFile(placeholderFile);
 
         const formData = new FormData();
         formData.append("file_id", selectedFileId);
 
         try {
-            const res = await axios.post("http://localhost:5643/analyze-existing/", formData);
+            const res = await axios.post("http://localhost:5643/analyze-existing/", formData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             setFileId(selectedFileId);
             setColumns(res.data.columns);
             setPreview(res.data.preview);
@@ -142,7 +144,9 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedMissingCols));
         try {
-            const res = await axios.post("http://localhost:5643/impute-missing/", formData);
+            const res = await axios.post("http://localhost:5643/impute-missing/", formData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             setImputationResult(res.data);
             alert('Пропуски успешно заполнены! Результаты показаны ниже.');
         } catch (err) {
@@ -162,7 +166,9 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedOutlierCols));
         try {
-            const res = await axios.post("http://localhost:5643/outliers/", formData);
+            const res = await axios.post("http://localhost:5643/outliers/", formData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             setOutliers(res.data.outlier_preview);
             setOutlierCount(res.data.outlier_count);
         } catch (err) {
@@ -195,30 +201,32 @@ const DataCleanerPage = () => {
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
                 <aside className="lg:col-span-1">
-                    <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6 sticky top-28">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-gradient-to-r from-gray-500 to-gray-700 rounded-xl"><History className="w-6 h-6 text-white" /></div>
-                            <h2 className="text-xl font-semibold text-gray-800">Ваши файлы</h2>
-                        </div>
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-                            {userFiles.length > 0 ? userFiles.map(f => (
-                                <button
-                                    key={f.file_uid}
-                                    onClick={() => handleSelectFile(f.file_uid, f.file_name)}
-                                    className={`w-full text-left p-3 rounded-lg transition-colors flex items-start gap-3 ${fileId === f.file_uid ? 'bg-blue-100 border-blue-300' : 'bg-gray-50 hover:bg-gray-100'}`}
-                                >
-                                    <FileClock className="w-5 h-5 text-gray-500 mt-0.5 flex-shrink-0" />
-                                    <div>
-                                        <p className="font-medium text-gray-800 break-all">{f.file_name}</p>
-                                        <p className="text-xs text-gray-500">{format(new Date(f.datetime_created), 'dd.MM.yyyy HH:mm')}</p>
-                                    </div>
-                                </button>
-                            )) : (
-                                <p className="text-sm text-gray-500 text-center py-4">Вы еще не загружали файлы.</p>
-                            )}
-                        </div>
+                {/* --- Сайдбар (без изменений) --- */}
+                <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6 sticky top-28">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="p-2 bg-gradient-to-r from-gray-500 to-gray-700 rounded-xl"><History className="w-6 h-6 text-white" /></div>
+                        <h2 className="text-xl font-semibold text-gray-800">Ваши файлы</h2>
                     </div>
-                </aside>
+                    {/* --- ДОБАВЛЕНЫ КЛАССЫ ДЛЯ СКРОЛЛА --- */}
+                    <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200/50">
+                        {userFiles.length > 0 ? userFiles.map(f => (
+                            <button
+                                key={f.file_uid}
+                                onClick={() => handleSelectFile(f.file_uid, f.file_name)}
+                                className={`w-full text-left p-3 rounded-lg transition-colors flex items-start gap-3 ${fileId === f.file_uid ? 'bg-blue-100 border-blue-300' : 'bg-gray-50 hover:bg-gray-100'}`}
+                            >
+                                <FileClock className="w-5 h-5 text-gray-500 mt-0.5 flex-shrink-0" />
+                                <div>
+                                    <p className="font-medium text-gray-800 break-all">{f.file_name}</p>
+                                    <p className="text-xs text-gray-500">{format(new Date(f.datetime_created), 'dd.MM.yyyy HH:mm')}</p>
+                                </div>
+                            </button>
+                        )) : (
+                            <p className="text-sm text-gray-500 text-center py-4">Вы еще не загружали файлы.</p>
+                        )}
+                    </div>
+                </div>
+            </aside>
 
                 {/* --- ОСНОВНОЙ КОНТЕНТ --- */}
                 <main className="lg:col-span-3 space-y-8">
@@ -226,12 +234,12 @@ const DataCleanerPage = () => {
                     <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-8">
                         <div className="flex items-center gap-4 mb-6">
                             <div className="p-3 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl"><Upload className="w-6 h-6 text-white" /></div>
-                            <div><h2 className="text-xl font-semibold text-gray-800">1. Загрузка и выбор данных</h2><p className="text-gray-600">Загрузите новый CSV файл или выберите существующий слева</p></div>
+                            <div><h2 className="text-xl font-semibold text-gray-800">1. Загрузка и выбор данных</h2><p className="text-gray-600">Загрузите новый CSV или Excel файл или выберите существующий слева</p></div>
                         </div>
                         <div className="flex items-center gap-4">
                             <label htmlFor="file-upload" className="flex items-center gap-2 px-6 py-3 bg-white border-2 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
                                 <FileText className="text-gray-600" /> <span className="text-gray-700 font-medium">{file ? file.name : "Выбрать файл"}</span>
-                                <input id="file-upload" type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
+                                <input id="file-upload" type="file" accept=".csv, .xlsx, .xls" onChange={handleFileChange} className="hidden" />
                             </label>
                             <button onClick={handleUpload} disabled={!file || isLoading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
                                 {isLoading ? <><Loader className="w-5 h-5 animate-spin" /><span>Загрузка...</span></> : <><Upload className="w-5 h-5" /><span>Загрузить</span></>}
@@ -270,7 +278,7 @@ const DataCleanerPage = () => {
                                         <div><h2 className="text-xl font-semibold text-gray-800">Анализ столбцов</h2><p className="text-gray-600">Обзор структуры данных</p></div>
                                     </div>
                                 </div>
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-green-400 scrollbar-track-green-100">
                                     <table className="w-full">
                                         <thead className="bg-gray-50/80">
                                             <tr>
@@ -302,20 +310,22 @@ const DataCleanerPage = () => {
                                     <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><Zap className="w-6 h-6 text-white" /></div>
                                     <div><h2 className="text-xl font-semibold text-gray-800">Заполнение пропусков с TabPFN</h2><p className="text-gray-600">Выберите столбцы для интеллектуального заполнения</p></div>
                                 </div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    {columns.filter((col) => col.nulls > 0).map((col) => (
-                                    <label key={col.column} className="relative">
-                                        <input type="checkbox" value={col.column} checked={selectedMissingCols.includes(col.column)}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setSelectedMissingCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
-                                            }} className="sr-only" />
-                                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedMissingCols.includes(col.column) ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                                            <div className="font-medium text-gray-900">{col.column}</div>
-                                            <div className="text-sm text-amber-600">{col.nulls} пропусков</div>
-                                        </div>
-                                    </label>
-                                    ))}
+                                <div className="max-h-[250px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-purple-400 scrollbar-track-purple-100">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                        {columns.filter((col) => col.nulls > 0).map((col) => (
+                                        <label key={col.column} className="relative">
+                                            <input type="checkbox" value={col.column} checked={selectedMissingCols.includes(col.column)}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setSelectedMissingCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
+                                                }} className="sr-only" />
+                                            <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedMissingCols.includes(col.column) ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+                                                <div className="font-medium text-gray-900">{col.column}</div>
+                                                <div className="text-sm text-amber-600">{col.nulls} пропусков</div>
+                                            </div>
+                                        </label>
+                                        ))}
+                                    </div>
                                 </div>
                                 <button onClick={handleImpute} disabled={isImputing || selectedMissingCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
                                     {isImputing ? <><Loader className="w-5 h-5 animate-spin" /><span>Заполнение...</span></> : "Заполнить пропуски"}
@@ -325,16 +335,47 @@ const DataCleanerPage = () => {
 
                             {/* Imputation Results Section */}
                             {imputationResult && (
-                            <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
-                                <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
-                                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl"><TrendingUp className="w-6 h-6 text-white" /></div>
-                                    <div><h2 className="text-xl font-semibold text-purple-800">Результаты заполнения</h2><p className="text-purple-600">Статистика обработки</p></div></div>
-                                </div>
-                                <div className="p-6">
-                                    {/* Здесь можно добавить таблицу с результатами импутации */}
-                                </div>
-                            </div>
-                            )}
+                                        <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
+                                            <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl">
+                                                        <TrendingUp className="w-6 h-6 text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xl font-semibold text-purple-800">Результаты заполнения</h2>
+                                                        <p className="text-purple-600">Статистика обработки для выбранных столбцов</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* --- НАЧАЛО: Добавленная таблица --- */}
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm">
+                                                    <thead className="bg-gray-50/80">
+                                                        <tr>
+                                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Столбец</th>
+                                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Пропусков до</th>
+                                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Пропусков после</th>
+                                                            <th className="px-6 py-4 text-left font-semibold text-gray-700">Статус</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-200/50">
+                                                        {Object.keys(imputationResult.processing_results).map((colName) => (
+                                                            <tr key={colName} className="hover:bg-gray-50/50">
+                                                                <td className="px-6 py-4 font-medium text-gray-900">{colName}</td>
+                                                                <td className="px-6 py-4 text-gray-800">{imputationResult.missing_before[colName]}</td>
+                                                                <td className={`px-6 py-4 font-semibold ${imputationResult.missing_after[colName] > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                                                                    {imputationResult.missing_after[colName]}
+                                                                </td>
+                                                                <td className="px-6 py-4 text-gray-800">{imputationResult.processing_results[colName]}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                             {/* --- КОНЕЦ: Добавленная таблица --- */}
+                                        </div>
+                                        )}
 
                             {/* Outlier Detection Section */}
                             {columns.length > 0 && (
@@ -343,20 +384,22 @@ const DataCleanerPage = () => {
                                     <div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><Filter className="w-6 h-6 text-white" /></div>
                                     <div><h2 className="text-xl font-semibold text-gray-800">Поиск выбросов</h2><p className="text-gray-600">Выберите числовые столбцы для анализа</p></div>
                                 </div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                {columns.filter((col) => col.dtype === "int64" || col.dtype === "float64").map((col) => (
-                                    <label key={col.column} className="relative">
-                                        <input type="checkbox" value={col.column} checked={selectedOutlierCols.includes(col.column)}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setSelectedOutlierCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
-                                            }} className="sr-only" />
-                                        <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedOutlierCols.includes(col.column) ? "border-red-500 bg-red-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
-                                            <div className="font-medium text-gray-900">{col.column}</div>
-                                            <div className="text-sm text-gray-500">{col.unique} уникальных</div>
-                                        </div>
-                                    </label>
-                                ))}
+                                <div className="max-h-[250px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-red-400 scrollbar-track-red-100">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {columns.filter((col) => col.dtype === "int64" || col.dtype === "float64").map((col) => (
+                                        <label key={col.column} className="relative">
+                                            <input type="checkbox" value={col.column} checked={selectedOutlierCols.includes(col.column)}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setSelectedOutlierCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
+                                                }} className="sr-only" />
+                                            <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedOutlierCols.includes(col.column) ? "border-red-500 bg-red-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+                                                <div className="font-medium text-gray-900">{col.column}</div>
+                                                <div className="text-sm text-gray-500">{col.unique} уникальных</div>
+                                            </div>
+                                        </label>
+                                    ))}
+                                    </div>
                                 </div>
                                 <button onClick={handleDetectOutliers} disabled={isAnalyzing || selectedOutlierCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
                                     {isAnalyzing ? <><Loader className="w-5 h-5 animate-spin" /><span>Анализ...</span></> : "Найти выбросы"}
@@ -368,11 +411,15 @@ const DataCleanerPage = () => {
                             {outlierCount !== null && (
                             <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-red-200/50 overflow-hidden">
                                 <div className="p-6 border-b border-red-200/50 bg-gradient-to-r from-red-50 to-pink-50">
-                                    <div className="flex items-center gap-3"><div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><AlertTriangle className="w-6 h-6 text-white" /></div>
-                                    <div><h2 className="text-xl font-semibold text-red-800">Обнаружено выбросов: {outlierCount}</h2><p className="text-red-600">Аномальные значения в данных</p></div></div>
+                                    <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl"><AlertTriangle className="w-6 h-6 text-white" /></div>
+                                    <div>
+                                    <h2 className="text-xl font-semibold text-red-800">Обнаружено выбросов: {outlierCount}</h2>
+                                    <p className="text-red-600">Аномальные значения в данных</p></div></div>
                                 </div>
                                 {outliers.length > 0 ? (
-                                    <div className="overflow-x-auto"><table className="w-full">
+                                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-red-400 scrollbar-track-red-100">
+                                    <table className="w-full">
                                         <thead className="bg-red-50/80"><tr>{Object.keys(outliers[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-red-700">{key}</th>)}</tr></thead>
                                         <tbody className="divide-y divide-red-200/50">{outliers.map((row, idx) => (<tr key={idx}>{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-red-900">{String(val)}</td>)}</tr>))}</tbody>
                                     </table></div>
@@ -383,9 +430,12 @@ const DataCleanerPage = () => {
                             {/* Data Preview Section */}
                             {preview.length > 0 && (
                                 <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 overflow-hidden">
-                                    <div className="p-6 border-b border-gray-200/50"><h2 className="text-xl font-semibold text-gray-800">Предпросмотр данных</h2></div>
-                                    <div className="overflow-x-auto"><table className="w-full">
-                                        <thead className="bg-gray-50/80"><tr>{Object.keys(preview[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">{key}</th>)}</tr></thead>
+                                    <div className="p-6 border-b border-gray-200/50">
+                                    <h2 className="text-xl font-semibold text-gray-800">Предпросмотр данных</h2></div>
+                                    <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200/50">
+                                    <table className="w-full">
+                                        <thead className="bg-gray-50/80">
+                                        <tr>{Object.keys(preview[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">{key}</th>)}</tr></thead>
                                         <tbody className="divide-y divide-gray-200/50">{preview.map((row, idx) => (<tr key={idx} className="hover:bg-gray-50/50">{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-gray-800">{String(val)}</td>)}</tr>))}</tbody>
                                     </table></div>
                                 </div>

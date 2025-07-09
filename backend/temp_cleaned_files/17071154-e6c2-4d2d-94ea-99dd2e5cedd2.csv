@@ -1,0 +1,74 @@
+Age,Gender,Education Level,Marital Status,Number of Dependents,Income,Credit Score,Debt-to-Income Ratio,Assets Value,Defaults Records,Employment Status,Years in Current Job
+36,Female,Bachelor's,Divorced,2,56789,715,0.25,158765,2,Employed,6
+37,Non-binary,Master's,Single,3,91234,789,0.18,176543,0,Employed,10
+45,Male,Bachelor's,Divorced,1,65432,723,0.25,134567,1,Employed,6
+39,Male,Master's,Single,0,92345,801,0.15,192345,0,Employed,10
+40,Female,Master's,Married,1,76543,756,0.22,162345,0,Employed,8
+52,Female,Bachelor's,Married,2,54321,698,0.32,141234,2,Employed,7
+38,Non-binary,Doctorate,Divorced,2,60123,746,0.24,161234,1,Employed,7
+41,Male,Doctorate,Single,2,94796,742,0.35,134567,3,Unemployed,16
+36,Non-binary,Doctorate,Single,4,85355,667,0.19,162345,2,Employed,12
+36,Male,Master's,Widowed,0,89012,798,0.16,189012,0,Employed,10
+54,Male,Master's,Married,3,56789,712,0.26,130987,2,Employed,6
+32,Female,Bachelor's,Married,2,85234,786,0.2,168765,0,Employed,8
+34,Male,Doctorate,Married,1,115201,632,0.24,81794,1,Employed,10
+49,Non-binary,High School,Divorced,3,109882,632,0.47,237388,2,Employed,3
+48,Non-binary,Doctorate,Married,3,46408,632,0.16,93647,1,Employed,16
+69,Non-binary,Doctorate,Single,3,38065,632,0.39,107451,0,Employed,8
+57,Female,Bachelor's,Widowed,1,67345,673,0.48,159119,1,Employed,8
+46,Non-binary,High School,Widowed,4,63731,637,0.54,156010,2,Employed,2
+49,Male,Bachelor's,Divorced,3,117392,685,0.47,261093,1,Employed,12
+57,Female,Master's,Single,3,54754,604,0.28,282006,2,Employed,13
+48,Male,Doctorate,Divorced,0,72799,688,0.15,120228,2,Employed,10
+21,Non-binary,Bachelor's,Single,0,55687,600,0.36,180700,3,Unemployed,0
+59,Male,Master's,Married,3,26508,622,0.45,157319,4,Unemployed,2
+42,Non-binary,Doctorate,Single,3,116212,707,0.11,212198,0,Employed,13
+55,Male,Bachelor's,Married,3,70978,706,0.27,54041,1,Employed,10
+56,Non-binary,Master's,Married,2,21084,702,0.23,226053,0,Employed,10
+35,Female,Doctorate,Married,2,85000,750,0.22,160145,0,Employed,8
+25,Female,High School or Below,Single,3,30901,551,0.42,87901,4,Unemployed,1
+28,Female,High School or Below,Single,3,31765,553,0.41,88765,4,Unemployed,2
+48,Male,Doctorate,Divorced,1,78000,730,0.18,133455,1,Employed,5
+27,Non-binary,Bachelor's,Single,1,60000,720,0.25,175684,0,Employed,10
+52,Female,Master's,Married,2,70000,740,0.2,140034,0,Employed,8
+38,Male,Doctorate,Single,1,82000,760,0.16,180346,0,Employed,10
+32,Female,Master's,Married,2,82345,746,0.21,155678,0,Employed,8
+47,Male,Master's,Divorced,1,76543,735,0.17,128321,1,Employed,6
+26,Non-binary,Doctorate,Single,0,58765,726,0.24,168987,0,Employed,10
+51,Female,Master's,Married,2,68432,742,0.19,138456,0,Employed,8
+37,Male,Doctorate,Single,1,80987,758,0.15,178321,0,Employed,10
+35,Female,Doctorate,Married,1,83456,772,0.18,165789,0,Employed,10
+31,Male,High School or Below,Divorced,3,32876,555,0.39,90567,2,Unemployed,2
+26,Female,Bachelor's,Married,0,31345,552,0.41,88456,3,Unemployed,1
+34,Male,High School or Below,Divorced,1,34678,560,0.38,91345,2,Unemployed,1
+33,Male,High School or Below,Divorced,1,34234,562,0.36,92012,2,Unemployed,1
+48,Male,Bachelor's,Married,2,75678,765,0.2,138901,0,Employed,9
+29,Non-binary,Doctorate,Single,0,67890,748,0.22,172345,0,Employed,10
+53,Female,Bachelor's,Married,2,72345,755,0.18,145678,0,Employed,9
+37,Male,Master's,Widowed,0,88765,781,0.15,189012,0,Employed,10
+35,Female,Doctorate,Married,1,83456,772,0.18,165789,0,Employed,10
+48,Male,Master's,Divorced,2,75678,765,0.2,138901,1,Employed,9
+29,Non-binary,Doctorate,Single,0,67890,748,0.22,172345,0,Employed,10
+53,Female,Master's,Married,2,72345,755,0.18,145678,2,Employed,9
+37,Male,Master's,Widowed,0,88765,781,0.15,189012,0,Employed,10
+40,Female,Doctorate,Married,1,82456,772,0.2,163789,0,Employed,9
+28,Non-binary,Master's,Single,0,58901,736,0.24,160987,1,Employed,7
+54,Male,Bachelor's,Married,3,67543,725,0.22,132678,2,Employed,6
+39,Male,Master's,Married,1,89234,795,0.16,191012,0,Employed,10
+32,Male,Bachelor's,Married,0,33567,558,0.37,90123,3,Unemployed,1
+26,Female,Bachelor's,Divorced,0,56789,715,0.25,158765,2,Employed,5
+23,Female,High School or Below,Single,3,35456,550,0.4,92678,3,Unemployed,1
+29,Female,High School or Below,Married,2,32123,554,0.39,89456,3,Unemployed,1
+35,Male,High School or Below,Divorced,1,3512,565,0.35,93234,3,Unemployed,1
+32,Female,Doctorate,Married,0,78923,765,0.21,167890,0,Employed,8
+40,Male,Master's,Widowed,0,98578,663,0.51,37396,0,Unemployed,1
+39,Male,High School or Below,Married,1,90227,770,0.52,163838,0,Employed,10
+31,Non-binary,High School or Below,Divorced,2,107081,740,0.11,25157,1,Employed,10
+45,Female,High School or Below,Widowed,4,82878,748,0.58,192705,4,Employed,10
+23,Male,High School or Below,Single,1,35817,731,0.51,20626,0,Unemployed,1
+36,Female,High School or Below,Married,4,65104,699,0.34,135458,2,Employed,9
+23,Male,Master's,Single,0,28906,724,0.5,96640,0,Unemployed,1
+22,Male,Master's,Single,0,104766,764,0.21,156630,3,Employed,10
+41,Female,Doctorate,Widowed,0,79556,742,0.32,247857,4,Employed,10
+47,Male,Bachelor's,Single,4,116102,629,0.52,228018,2,Employed,10
+42,Male,High School or Below,Married,2,32094,634,0.55,114375,2,Employed,10

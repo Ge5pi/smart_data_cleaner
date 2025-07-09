@@ -2,11 +2,11 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 import json
-from pathlib import Path
 import os
 import io
 import pandas as pd
 import numpy as np
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +27,6 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter
 from datetime import timedelta
 import auth
-
 
 api_key = API_KEY
 pinecone_key = PINECONE_KEY
@@ -58,6 +57,7 @@ async def lifespan(app: FastAPI):
     file_metadata_storage.clear()
     print("--- Cleared file metadata cache on shutdown ---")
 
+
 client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI()
@@ -84,6 +84,11 @@ index = pc.Index(INDEX_NAME)
 
 file_metadata_storage = {}
 session_cache = {}
+ALLOWED_EXTENSIONS = {'csv', 'xls', 'xlsx'}
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 @user_router.post("/users/register", response_model=schemas.User)
@@ -114,8 +119,8 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @user_router.get("/files/me", response_model=list[schemas.File])
 def read_user_files(
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_active_user)
+        db: Session = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_active_user)
 ):
     return crud.get_files_by_user_id(db=db, user_id=current_user.id)
 
@@ -139,6 +144,7 @@ async def start_session(file_id: str = Form(...), current_user: models.User = De
 
 
 app.include_router(user_router)
+
 
 def format_row(row_index: int, row: pd.Series) -> str:
     return f"Row-{row_index + 1}: " + " | ".join([f"{col}: {row[col]}" for col in row.index])
@@ -400,15 +406,21 @@ available_functions = {
     "save_dataframe_to_file": save_dataframe_to_file,  # Регистрируем новый инструмент
 }
 
+
 @app.post("/upload/")
 async def upload_csv(
-    file: UploadFile = File(...),
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_active_user)
+        file: UploadFile = File(...),
+        db: Session = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_active_user)
 ):
     file_id = str(uuid.uuid4())
     output_path = TEMP_DIR / f"{file_id}.csv"
     original_filename = file.filename
+
+    file_extension = Path(original_filename).suffix.lower()
+    if file_extension not in ['.csv', '.xlsx', '.xls']:
+        raise HTTPException(status_code=400,
+                            detail="Неподдерживаемый тип файла. Пожалуйста, загрузите CSV или Excel файл.")
 
     crud.create_user_file(
         db=db,
@@ -417,12 +429,18 @@ async def upload_csv(
         file_name=original_filename
     )
 
-    with open(output_path, "wb") as buffer:
-        buffer.write(await file.read())
+    try:
+        if file_extension == '.csv':
+            df = pd.read_csv(file.file, encoding="utf-8")
+        else:
+            contents = await file.read()
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Не удалось прочитать файл. Ошибка: {e}")
 
-    df = pd.read_csv(output_path)
     df = df.replace([np.inf, -np.inf], np.nan)
-    df.to_csv(output_path, index=False)
+
+    df.to_csv(output_path, index=False, encoding="utf-8")
 
     file_metadata_storage[file_id] = {
         "file_path": str(output_path),
@@ -451,9 +469,8 @@ async def upload_csv(
         except Exception as e:
             print(f"Ошибка при обработке пачки {i}-{i + BATCH_SIZE}: {e}")
 
-    preview_data = df.head(10).fillna("null").to_dict(orient="records")
+    preview_data = df.fillna("null").to_dict(orient="records")
     return {"preview": preview_data, "file_id": file_id}
-
 
 @app.post("/sessions/start")
 async def start_session(file_id: str = Form(...)):
@@ -595,8 +612,8 @@ async def get_chart_data(
         chart_type: str = Form(...),
         column1: str = Form(...),
         column2: Optional[str] = Form(None),
+        column3: Optional[str] = Form(None),
 ):
-    """Готовит данные для указанного типа графика."""
     if file_id not in file_metadata_storage:
         raise HTTPException(status_code=404, detail="Файл не найден в кэше сервера.")
 
@@ -606,38 +623,55 @@ async def get_chart_data(
     chart_data = {}
 
     try:
-
-        if chart_type == "histogram" or chart_type == "pie":
+        if chart_type in ["histogram", "pie"]:
+            # ... (логика без изменений)
             if df[column1].dtype == 'object':
                 counts = df[column1].dropna().value_counts().nlargest(15)
-            else:  # для чисел
+            else:
                 counts = df[column1].dropna().value_counts()
+            chart_data = {"labels": counts.index.astype(str).tolist(), "values": counts.values.tolist()}
 
-            chart_data = {
-                "labels": counts.index.astype(str).tolist(),
-                "values": counts.values.tolist(),
-            }
-
-        elif chart_type == "scatter" and column2:
-            # Для диаграммы рассеяния
-            scatter_df = df[[column1, column2]].dropna()
-            chart_data = {
-                "points": scatter_df.to_dict(orient='records')
-            }
-
-        elif chart_type == "line" and column2:
+        elif chart_type in ["line", "area"] and column2:
             try:
                 df[column1] = pd.to_datetime(df[column1])
                 line_df = df[[column1, column2]].dropna().sort_values(by=column1)
-
                 chart_data = {
-                    "labels": line_df[column1].dt.strftime('%Y-%m-%d').tolist(),  # Форматируем даты
+                    "labels": line_df[column1].dt.strftime('%Y-%m-%d').tolist(),
                     "values": line_df[column2].tolist(),
                 }
             except Exception:
+                raise HTTPException(status_code=400, detail=f"Не удалось преобразовать столбец '{column1}' в дату.")
+
+        elif chart_type == "scatter" and column2:
+            scatter_df = df[[column1, column2]].dropna()
+            chart_data = {"points": scatter_df.to_dict(orient='records')}
+
+        elif chart_type == "bubble" and column2 and column3:
+            bubble_df = df[[column1, column2, column3]].dropna()
+            for col in [column1, column2, column3]:
+                if not pd.api.types.is_numeric_dtype(bubble_df[col]):
+                    raise HTTPException(status_code=400,
+                                        detail=f"Для пузырьковой диаграммы все столбцы должны быть числовыми. Столбец '{col}' не является числовым.")
+
+            chart_data = {"points": bubble_df.to_dict(orient='records')}
+
+        elif chart_type == "boxplot":
+            if not pd.api.types.is_numeric_dtype(df[column1]):
                 raise HTTPException(status_code=400,
-                                    detail=f"Не удалось преобразовать столбец '{column1}' в дату. Выберите другой "
-                                           f"столбец для оси X.")
+                                    detail=f"Для 'Ящика с усами' столбец '{column1}' должен быть числовым.")
+
+            stats = df[column1].describe()
+            q1 = stats['25%']
+            q3 = stats['75%']
+            iqr = q3 - q1
+            lower_whisker = q1 - 1.5 * iqr
+            upper_whisker = q3 + 1.5 * iqr
+
+            chart_data = {
+                "min": stats['min'], "q1": q1, "median": stats['50%'],
+                "q3": q3, "max": stats['max'],
+                "outliers": df[(df[column1] < lower_whisker) | (df[column1] > upper_whisker)][column1].tolist()
+            }
 
         else:
             raise HTTPException(status_code=400, detail="Неверный тип графика или нехватка данных.")

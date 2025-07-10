@@ -285,7 +285,6 @@ const ChartsPage = () => {
         backgroundColor: 'rgba(192, 75, 192, 0.6)',
         borderColor: 'rgb(192, 75, 192)',
         borderWidth: 1,
-        padding: 10,
         itemRadius: 0
       }]
     }}

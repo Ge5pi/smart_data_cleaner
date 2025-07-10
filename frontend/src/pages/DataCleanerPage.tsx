@@ -47,7 +47,7 @@ const DataCleanerPage = () => {
                 setPreview(res.data.preview);
                 setTotalRows(res.data.total_rows);
             })
-            .catch(err => {
+            .catch(_ => {
                 setError("Не удалось загрузить предпросмотр данных.");
             })
             .finally(() => setIsLoading(false));

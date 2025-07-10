@@ -472,18 +472,6 @@ async def upload_csv(
     preview_data = df.fillna("null").to_dict(orient="records")
     return {"preview": preview_data, "file_id": file_id}
 
-@app.post("/sessions/start")
-async def start_session(file_id: str = Form(...)):
-    if file_id not in file_metadata_storage:
-        raise HTTPException(status_code=404, detail="Файл с таким ID не найден.")
-    session_id = str(uuid.uuid4())
-    df = pd.read_csv(file_metadata_storage[file_id]['file_path'])
-    session_cache[session_id] = {
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
-        "dataframe": df, "file_id": file_id
-    }
-    return {"session_id": session_id, "message": "Сессия успешно начата."}
-
 
 @app.post("/sessions/ask")
 async def session_ask(session_id: str = Form(...), query: str = Form(...)):

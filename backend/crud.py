@@ -46,3 +46,7 @@ def create_user_file(db: Session, user_id: int, file_uid: str, file_name: str) -
     db.commit()
     db.refresh(db_file)
     return db_file
+
+
+def get_file_by_uid(db: Session, file_uid: str) -> models.File:
+    return db.query(models.File).filter(models.File.file_uid == file_uid).first()

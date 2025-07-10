@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { Send, Loader, BrainCircuit } from 'lucide-react';
+import api from '../api';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -36,9 +37,7 @@ const ChatPage = () => {
       const sessionFormData = new FormData();
       sessionFormData.append("file_id", fileId);
 
-      axios.post("http://localhost:5643/sessions/start", sessionFormData, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
+      api.post("/sessions/start", sessionFormData)
         .then(res => {
           const newSessionId = res.data.session_id;
           setSessionId(newSessionId);
@@ -74,9 +73,7 @@ const ChatPage = () => {
     formData.append("query", queryToSend);
 
     try {
-      const res = await axios.post("http://localhost:5643/sessions/ask", formData, {
-          headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await api.post("/sessions/ask", formData);
       setChatHistory(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
     } catch (err: any) {
         const message = err.response?.data?.detail || "Произошла ошибка при обработке вашего запроса.";

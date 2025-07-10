@@ -1,17 +1,19 @@
 version: '3.8'
+
 services:
   backend:
-    build: ./backend
-    ports:
-      - "5643:5643"
-    volumes:
-      - ./backend:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 5643 --reload
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    env_file:
+      - ./backend/.env
+    command: gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app -b 0.0.0.0:8000
 
-  frontend:
-    build: ./frontend
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-    command: npm run dev
+      - "80:80"
+    depends_on:
+      - backend

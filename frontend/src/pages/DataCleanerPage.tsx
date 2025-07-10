@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp, Loader, History, FileClock } from "lucide-react";
 import { format } from 'date-fns';
+import api from '../api';
 
 // Определим тип для результатов импутации, чтобы было проще работать
 type ImputationResult = {
@@ -33,16 +34,36 @@ const DataCleanerPage = () => {
     const [outlierCount, setOutlierCount] = useState<number | null>(null);
     const [selectedEncodingCols, setSelectedEncodingCols] = useState<string[]>([]);
     const [isEncoding, setIsEncoding] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [rowsPerPage, setRowsPerPage] = useState(50);
+    const [totalRows, setTotalRows] = useState(0);
 
 
-    // --- 1. ЗАГРУЗКА СПИСКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЯ ---
+    useEffect(() => {
+        if (fileId) { // Токен уже проверяется в api.ts, можно убрать
+            setIsLoading(true);
+            // Убираем лишний headers, interceptor в api.ts сделает всё сам
+            api.get(`/preview/${fileId}`, {
+                params: { page: currentPage, page_size: rowsPerPage }
+            })
+            .then(res => {
+                setPreview(res.data.preview);
+                setTotalRows(res.data.total_rows);
+            })
+            .catch(err => {
+                setError("Не удалось загрузить предпросмотр данных.");
+            })
+            .finally(() => setIsLoading(false));
+        }
+    }, [fileId, currentPage]);
+
+
     useEffect(() => {
         const fetchUserFiles = async () => {
             if (token) {
                 try {
-                    const res = await axios.get("http://localhost:5643/files/me", {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
+                    // Убираем headers
+                    const res = await api.get('/files/me');
                     setUserFiles(res.data);
                 } catch (err) {
                     console.error("Не удалось загрузить список файлов:", err);
@@ -66,12 +87,13 @@ const DataCleanerPage = () => {
         formData.append("file_id", selectedFileId);
 
         try {
-            const res = await axios.post(`${API_URL}/analyze-existing/`, formData, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            // Убираем headers
+            const res = await api.post('/analyze-existing/', formData);
             setFileId(selectedFileId);
             setColumns(res.data.columns);
             setPreview(res.data.preview);
+            setTotalRows(res.data.total_rows || res.data.preview.length);
+            setCurrentPage(1);
         } catch (err: any) {
             // --- ИЗМЕНЕНИЕ ---
             const message = err.response?.data?.detail || "Не удалось проанализировать выбранный файл.";
@@ -92,9 +114,7 @@ const DataCleanerPage = () => {
         formData.append("columns", JSON.stringify(selectedEncodingCols));
 
         try {
-            const res = await axios.post(`http://localhost:5643/encode-categorical/`, formData, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await api.post(`/encode-categorical/`, formData);
 
             // Обновляем состояние страницы новыми данными с сервера
             setColumns(res.data.columns);
@@ -144,9 +164,7 @@ const DataCleanerPage = () => {
         uploadFormData.append("file", file);
 
         try {
-            const uploadRes = await axios.post("http://localhost:5643/upload/", uploadFormData, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const uploadRes = await api.post("/upload/", uploadFormData);
 
             // Обновляем список файлов в UI после успешной загрузки
             const newFile = {
@@ -179,9 +197,7 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedMissingCols));
         try {
-            const res = await axios.post(`${API_URL}/impute-missing/`, formData, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await api.post(`/impute-missing/`, formData);
             setImputationResult(res.data);
             alert('Пропуски успешно заполнены!');
         } catch (err: any) {
@@ -203,9 +219,7 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedOutlierCols));
         try {
-            const res = await axios.post(`${API_URL}/outliers/`, formData, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await api.post(`/outliers/`, formData);
             setOutliers(res.data.outlier_preview);
             setOutlierCount(res.data.outlier_count);
         } catch (err: any) {
@@ -218,12 +232,33 @@ const DataCleanerPage = () => {
         }
     };
 
-    const handleDownload = () => {
+    const handleDownload = async () => {
         if (!fileId) return;
-        window.open(`http://localhost:5643/download-cleaned/${fileId}`, '_blank');
+
+        try {
+            const response = await api.get(`/download-cleaned/${fileId}`, {
+                responseType: 'blob',
+            });
+
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+
+            const currentFileName = file?.name || 'cleaned_data.csv';
+            link.setAttribute('download', currentFileName);
+
+            document.body.appendChild(link);
+            link.click();
+
+            link.parentNode?.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+        } catch (error) {
+            console.error('Ошибка при скачивании файла:', error);
+            setError('Не удалось скачать файл.');
+        }
     };
 
-    // --- 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СТИЛИЗАЦИИ ---
     const getTypeColor = (dtype: string) => {
         if (dtype.includes("int") || dtype.includes("float")) return "bg-blue-100 text-blue-800";
         if (dtype.includes("object")) return "bg-green-100 text-green-800";
@@ -500,8 +535,37 @@ const DataCleanerPage = () => {
                                         <tr>{Object.keys(preview[0]).map((key) => <th key={key} className="px-6 py-4 text-left text-sm font-semibold text-gray-700">{key}</th>)}</tr></thead>
                                         <tbody className="divide-y divide-gray-200/50">{preview.map((row, idx) => (<tr key={idx} className="hover:bg-gray-50/50">{Object.values(row).map((val: any, i) => <td key={i} className="px-6 py-4 text-gray-800">{String(val)}</td>)}</tr>))}</tbody>
                                     </table></div>
+
+                                    {totalRows > 0 && (
+                                        <div className="flex items-center justify-between p-4 border-t border-gray-200/50">
+                                            <span className="text-sm text-gray-700">
+                                                Всего строк: <span className="font-semibold">{totalRows}</span>
+                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                                    disabled={currentPage === 1 || isLoading}
+                                                    className="px-3 py-1 border rounded-md disabled:opacity-50"
+                                                >
+                                                    Назад
+                                                </button>
+                                                <span className="text-sm text-gray-700">
+                                                    Страница {currentPage} из {Math.ceil(totalRows / rowsPerPage)}
+                                                </span>
+                                                <button
+                                                    onClick={() => setCurrentPage(p => Math.min(Math.ceil(totalRows / rowsPerPage), p + 1))}
+                                                    disabled={currentPage === Math.ceil(totalRows / rowsPerPage) || isLoading}
+                                                    className="px-3 py-1 border rounded-md disabled:opacity-50"
+                                                >
+                                                    Вперед
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
+
+
 
                             {/* Download Section */}
                             {fileId && (

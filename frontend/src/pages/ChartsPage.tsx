@@ -16,6 +16,7 @@ import {
   TimeScale
 } from 'chart.js';
 import { BarChart3, TrendingUp, Loader } from "lucide-react";
+import api from '../api';
 
 // --- НАЧАЛО ИСПРАВЛЕНИЯ ---
 // 1. Импортируем из НОВОЙ, правильной библиотеки
@@ -56,9 +57,7 @@ const ChartsPage = () => {
       const formData = new FormData();
       formData.append("file_id", fileId);
 
-      axios.post("http://localhost:5643/analyze-existing/", formData, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
+      api.post("/analyze-existing/", formData)
         .then(res => setColumns(res.data.columns))
         .catch(err => {
           console.error("Ошибка при загрузке данных", err);
@@ -99,9 +98,7 @@ const ChartsPage = () => {
     if (selectedChartCol3) formData.append('column3', selectedChartCol3);
 
     try {
-      const res = await axios.post("http://localhost:5643/chart-data/", formData, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await api.post("/chart-data/", formData);
       setChartData(res.data);
     } catch (err: any) {
       const detail = err.response?.data?.detail || "Проверьте типы данных.";

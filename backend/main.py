@@ -65,6 +65,12 @@ client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI(title="SODA API")
 
+
+@app.get("/health", tags=["System"])
+async def health_check():
+    return {"status": "ok"}
+
+
 EMBEDDING_MODEL = "text-embedding-3-small"
 AGENT_MODEL = "o4-mini"
 CRITIC_MODEL = "o4-mini"

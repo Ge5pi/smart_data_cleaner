@@ -1,11 +1,16 @@
 FROM python:3.11-slim
-
 WORKDIR /app
 
+# Устанавливаем зависимости
 COPY ./backend/requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Копируем код бэкенда
 COPY ./backend .
 
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend/main:app", "-b", "0.0.0.0:8000"]
+# Копируем наш новый скрипт запуска
+COPY entrypoint.sh .
+RUN chmod +x ./entrypoint.sh # Делаем скрипт исполняемым
+
+# Указываем, что контейнер будет запускаться через этот скрипт
+ENTRYPOINT ["./entrypoint.sh"]

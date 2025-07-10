@@ -1,7 +1,7 @@
-import React, { createContext, useState, ReactNode, useEffect } from 'react';
+import { createContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 
-// Определим типы для полноты картины
 type ColumnAnalysis = {
   column: string;
   dtype: string;

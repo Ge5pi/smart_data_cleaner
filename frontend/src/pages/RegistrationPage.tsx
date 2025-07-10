@@ -1,5 +1,4 @@
-// src/pages/RegistrationPage.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { UserPlus, Mail, KeyRound, Loader } from 'lucide-react';

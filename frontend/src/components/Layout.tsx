@@ -1,13 +1,9 @@
-// src/components/Layout.tsx
-
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-// ИСПРАВЛЕНИЕ 1: Добавляем BarChartHorizontal в импорты
 import { Database, BotMessageSquare, LogIn, UserPlus, LogOut, BarChartHorizontal } from 'lucide-react';
 import { useContext } from 'react';
 import { AppContext } from '../contexts/AppContext';
 
 const Layout = () => {
-  // ИСПРАВЛЕНИЕ 2: Извлекаем fileId из контекста вместе с user и logout
   const { user, logout, fileId } = useContext(AppContext)!;
   const navigate = useNavigate();
 

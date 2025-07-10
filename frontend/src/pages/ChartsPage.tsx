@@ -1,6 +1,5 @@
-import React, { useState, useContext, useEffect } from 'react';
+import { useState, useContext, useEffect } from 'react';
 import { AppContext } from '../contexts/AppContext';
-import axios from 'axios';
 import { Chart, Bar, Scatter, Pie, Line, Bubble } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -286,7 +285,6 @@ const ChartsPage = () => {
         backgroundColor: 'rgba(192, 75, 192, 0.6)',
         borderColor: 'rgb(192, 75, 192)',
         borderWidth: 1,
-        outlierColor: '#999999',
         padding: 10,
         itemRadius: 0
       }]

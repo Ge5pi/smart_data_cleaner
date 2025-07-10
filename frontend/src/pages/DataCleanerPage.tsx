@@ -1,12 +1,10 @@
-import React, { useState, useContext, useEffect } from 'react';
+import { useState, useContext, useEffect } from 'react';
 import { AppContext } from '../contexts/AppContext';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
-import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Eye, Filter, Zap, TrendingUp, Loader, History, FileClock } from "lucide-react";
+import { Upload, FileText, AlertTriangle, BarChart3, Database, CheckCircle2, Filter, Zap, TrendingUp, Loader, History, FileClock } from "lucide-react";
 import { format } from 'date-fns';
 import api from '../api';
 
-// Определим тип для результатов импутации, чтобы было проще работать
 type ImputationResult = {
   preview: any[];
   missing_before: { [key: string]: number };
@@ -16,7 +14,6 @@ type ImputationResult = {
 };
 
 const DataCleanerPage = () => {
-    // Получаем глобальное состояние и функции из AppContext
     const {
         file, setFile, fileId, setFileId, columns, setColumns, preview, setPreview,
         isLoading, setIsLoading, error, setError, resetState,
@@ -35,7 +32,7 @@ const DataCleanerPage = () => {
     const [selectedEncodingCols, setSelectedEncodingCols] = useState<string[]>([]);
     const [isEncoding, setIsEncoding] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
-    const [rowsPerPage, setRowsPerPage] = useState(50);
+    const rowsPerPage = 50;
     const [totalRows, setTotalRows] = useState(0);
 
 

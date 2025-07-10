@@ -113,6 +113,9 @@ const RegistrationPage = () => {
           >
             {isLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'Зарегистрироваться'}
           </button>
+          <div className="relative">
+          <p className="text-gray-600 px-1  font-semibold gap-2 inline text-lg">Уже есть аккаунт?</p> <a href="/login"> <h3 className="text-lg gap-2 text-blue-500 inline font-bold">Войти</h3></a>
+          </div>
         </form>
       </div>
     </div>

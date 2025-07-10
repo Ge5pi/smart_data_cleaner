@@ -35,11 +35,12 @@ def get_all_files(db: Session):
     return db.query(models.File).all()
 
 
-def create_user_file(db: Session, user_id: int, file_uid: str, file_name: str) -> models.File:
+def create_user_file(db: Session, user_id: int, file_uid: str, file_name: str, s3_path: str) -> models.File:
     db_file = models.File(
         user_id=user_id,
         file_uid=file_uid,
-        file_name=file_name,  # <-- Добавляем имя файла
+        file_name=file_name,
+        s3_path=s3_path,  # <-- Важное поле для облачной версии
         datetime_created=datetime.now(timezone.utc)
     )
     db.add(db_file)

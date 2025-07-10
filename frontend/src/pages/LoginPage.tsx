@@ -5,17 +5,15 @@ import axios from 'axios';
 import { KeyRound, Mail, Loader, LogIn } from 'lucide-react';
 
 const LoginPage = () => {
-    // ... (все ваши useState остаются без изменений)
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     const navigate = useNavigate();
-    const location = useLocation(); // <-- Получаем location
+    const location = useLocation();
     const { login } = useContext(AppContext)!;
 
-    // Получаем путь, с которого пользователя перенаправили, или '/' по умолчанию
     const from = location.state?.from?.pathname || "/";
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -32,9 +30,6 @@ const LoginPage = () => {
             const token = res.data.access_token;
 
             login(token);
-
-            // --- ИЗМЕНЕНИЕ ---
-            // Перенаправляем пользователя на ту страницу, куда он хотел попасть
             navigate(from, { replace: true });
 
         } catch (err: any) {
@@ -75,6 +70,9 @@ const LoginPage = () => {
             className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-semibold">
             {isLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'Войти'}
           </button>
+          <div className="relative">
+          <p className="text-gray-600 px-1 font-semibold gap-2 inline text-lg">Нет аккаунта?</p> <a href="/register"> <h3 className="text-lg gap-2 text-green-600 inline font-bold">Зарегистрироваться</h3></a>
+          </div>
         </form>
       </div>
     </div>

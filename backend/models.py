@@ -22,3 +22,4 @@ class File(Base):
     datetime_created = Column(DateTime, nullable=False)
     file_name = Column(String, nullable=False)
     owner = relationship("User", back_populates="files")
+    s3_path = Column(String, unique=True, nullable=False)

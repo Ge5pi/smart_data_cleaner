@@ -332,8 +332,6 @@ const DataCleanerPage = () => {
                                 </button>
                             </div>
                             )}
-
-                            {/* Imputation Results Section */}
                             {imputationResult && (
                                         <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-200/50 overflow-hidden">
                                             <div className="p-6 border-b border-purple-200/50 bg-gradient-to-r from-purple-50 to-pink-50">
@@ -347,8 +345,6 @@ const DataCleanerPage = () => {
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            {/* --- НАЧАЛО: Добавленная таблица --- */}
                                             <div className="overflow-x-auto">
                                                 <table className="w-full text-sm">
                                                     <thead className="bg-gray-50/80">
@@ -360,7 +356,7 @@ const DataCleanerPage = () => {
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-200/50">
-                                                        {Object.keys(imputationResult.processing_results).map((colName) => (
+                                                        {Object.keys(imputationResult?.processing_results || {}).map((colName) => (
                                                             <tr key={colName} className="hover:bg-gray-50/50">
                                                                 <td className="px-6 py-4 font-medium text-gray-900">{colName}</td>
                                                                 <td className="px-6 py-4 text-gray-800">{imputationResult.missing_before[colName]}</td>
@@ -373,11 +369,9 @@ const DataCleanerPage = () => {
                                                     </tbody>
                                                 </table>
                                             </div>
-                                             {/* --- КОНЕЦ: Добавленная таблица --- */}
                                         </div>
                                         )}
 
-                            {/* Outlier Detection Section */}
                             {columns.length > 0 && (
                             <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
                                  <div className="flex items-center gap-3 mb-6">

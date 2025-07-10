@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import { UserPlus, Mail, KeyRound, Loader } from 'lucide-react';
 
 const RegistrationPage = () => {
@@ -37,7 +37,7 @@ const RegistrationPage = () => {
     try {
       // 2. Передаем объект userData напрямую.
       //    Axios автоматически преобразует его в JSON и установит правильный заголовок Content-Type.
-      await axios.post('http://localhost:5643/users/register', userData);
+      await api.post('/users/register', userData);
 
       alert('Регистрация прошла успешно! Теперь вы можете войти.');
       // Примечание: Убедитесь, что вы используете правильный порт (8000, а не 5643)

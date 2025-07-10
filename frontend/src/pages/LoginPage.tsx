@@ -1,7 +1,7 @@
 import { useState, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppContext } from '../contexts/AppContext';
-import axios from 'axios';
+import api from '../api';
 import { KeyRound, Mail, Loader, LogIn } from 'lucide-react';
 
 const LoginPage = () => {
@@ -26,7 +26,7 @@ const LoginPage = () => {
         formData.append('password', password);
 
         try {
-            const res = await axios.post('http://localhost:5643/token', formData);
+            const res = await api.post('/token', formData);
             const token = res.data.access_token;
 
             login(token);

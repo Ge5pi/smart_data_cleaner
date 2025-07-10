@@ -10,9 +10,10 @@ import openai
 import pandas as pd
 import pinecone
 import redis
+from langdetect import detect, LangDetectException
 from fastapi import APIRouter
 from fastapi import Depends
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sklearn.ensemble import IsolationForest
@@ -54,13 +55,19 @@ try:
 except Exception as e:
     print(f"FATAL: Could not connect to AWS or Redis on startup. Error: {e}")
 
+LANG_MAP = {
+    'ru': 'русском',
+    'en': 'английском',
+    'kz': 'казахском'
+}
+
 client = openai.OpenAI(api_key=api_key)
 pc = pinecone.Pinecone(api_key=pinecone_key)
 app = FastAPI(title="SODA API")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-AGENT_MODEL = "gpt-4o"
-CRITIC_MODEL = "gpt-4o"
+AGENT_MODEL = "o4-mini"
+CRITIC_MODEL = "o4-mini"
 INDEX_NAME = "soda-index"
 BATCH_SIZE = 100
 
@@ -271,7 +278,8 @@ def get_critic_evaluation(query: str, answer: str) -> dict:
         is bad. For example: "The answer hallucinates information not present in the query" or "The calculation seems 
         incorrect for the requested metric." 5.  **suggestion**: If the answer is poor, suggest a better approach. 
         For example: "It would be better to use `df.groupby('category')['sales'].sum()`" or "A better approach would 
-        be to use the RAG tool to find the specific row." 
+        be to use the RAG tool to find the specific row. Nevertheless, the answer must be as short and exact as 
+        possible unless it wasn't asked to explain something" 
 
         **Output (JSON format only):**
         """
@@ -289,26 +297,25 @@ def get_critic_evaluation(query: str, answer: str) -> dict:
                 "feedback": "Critic model failed, assuming success."}
 
 
-def get_refined_answer(history: list, original_answer: str, feedback: str, suggestion: str) -> str:
-    refiner_prompt = f""" You are an expert data analyst. Your previous attempt to answer a user's question was 
-    flawed. A critic has provided feedback. Your task is to generate a new, final, and correct answer that 
-    incorporates this feedback. 
+def get_refined_answer(history: list, original_answer: str, feedback: str, suggestion: str, lang_name: str) -> str:
+    """Генерирует улучшенный ответ на основе отзыва критика с указанием языка."""
+    refiner_prompt = f"""Ты — эксперт по анализу данных. Твоя предыдущая попытка ответить на вопрос пользователя была неудачной. Критик предоставил отзыв.
+    Твоя задача — сгенерировать новый, финальный и правильный ответ, который учитывает этот отзыв.
 
-        **Original Conversation History:**
+        **Исходная история диалога:**
         {json.dumps(history, indent=2, ensure_ascii=False)}
 
-        **Your previous (unsatisfactory) answer:**
+        **Твой предыдущий (неудовлетворительный) ответ:**
         {original_answer}
 
-        **Critic's Feedback (What was wrong):**
+        **Отзыв критика (что было не так):**
         {feedback}
 
-        **Critic's Suggestion (How to fix it):**
+        **Предложение критика (как это исправить):**
         {suggestion}
 
-        **Your Task:** Generate a new, improved, and complete answer. The new answer must directly address the user's 
-        last question and fix the issues raised by the critic. Do not repeat the mistakes. Present the final result 
-        clearly to the user. """
+        **Твоя задача:** Сгенерируй новый, улучшенный и полный ответ **на {lang_name} языке**. Новый ответ должен напрямую отвечать на последний вопрос пользователя и исправлять проблемы, поднятые критиком. Не повторяй ошибок. Представь финальный результат пользователю в ясной и понятной форме.
+        """
     response = client.chat.completions.create(
         model=AGENT_MODEL,
         messages=[{"role": "user", "content": refiner_prompt}],
@@ -317,71 +324,68 @@ def get_refined_answer(history: list, original_answer: str, feedback: str, sugge
     return response.choices[0].message.content
 
 
-SYSTEM_PROMPT = """Ты — элитный AI-аналитик данных SODA (Strategic Operations & Data Analyst). Твоя работа — помогать 
-пользователю анализировать данные в pandas DataFrame `df`. 
+SYSTEM_PROMPT = """Ты — элитный AI-аналитик данных SODA. Твоя работа — помогать пользователю анализировать данные в 
+pandas DataFrame `df`. 
 
-**Твой мыслительный процесс должен быть следующим:** 1.  **Анализ Запроса:** Внимательно изучи вопрос пользователя и 
-предоставленный контекст (`df.info()`, `df.head()`). Определи ключевую цель пользователя: он хочет изменить данные, 
-получить агрегированную информацию, найти что-то конкретное или понять смысл данных? 2.  **Выбор Инструмента:** 
-Основываясь на цели, выбери ОДИН из доступных инструментов. *   Используй `execute_python_code`, если запрос требует: 
-- Математических операций (среднее, сумма, группировка, подсчет). - Фильтрации или сортировки данных (`df[...]`, 
-`.query()`, `.sort_values()`). - Модификации DataFrame (создание новых столбцов, удаление, заполнение пропусков). - 
-Получения информации о структуре данных (`df.describe()`, `df.corr()`). *   Используй `answer_question_from_context`, 
-если запрос требует: - Найти и описать конкретные строки по смысловому содержанию (например, "Что известно о клиенте 
-Иване Петрове?", "Найди записи, связанные с 'неудачной доставкой'"). - Ответить на общие вопросы, ответ на которые 
-может содержаться в одной или нескольких строках как текст. *   Используй `save_dataframe_to_file` **ТОЛЬКО** если 
-пользователь явно и недвусмысленно попросил "сохрани файл", "запиши изменения" или аналогичное. Всегда уточняй перед 
-сохранением, если не уверен. 3.  **Формулировка Ответа:** После выполнения инструмента, предоставь пользователю 
-четкий и лаконичный ответ. *   Если ты использовал `execute_python_code`, покажи результат (обычно это 
-markdown-таблица) и кратко объясни, что он означает. *   Если ты получил ошибку при выполнении кода, проанализируй 
-ее, исправь свой код и попробуй снова. Не повторяй одну и ту же ошибку. *   Отвечай всегда на языке запроса. """
+**Ключевые правила:** 1.  **Состояние DataFrame:** Объект `df` является состоянием. Изменения, внесенные с помощью 
+`execute_python_code`, сохраняются между запросами в рамках одной сессии. Всегда работай с актуальным состоянием 
+`df`. 2.  **Думай шаг за шагом:** Прежде чем выбрать инструмент, четко определи цель пользователя. 3.  **Выбор 
+инструмента:** * `execute_python_code`: Для любых вычислений, фильтрации, агрегации, модификации `df` или получения 
+мета-информации (`df.describe()`, `df.shape`). * `answer_question_from_context`: Только для смыслового поиска по 
+текстовому содержанию строк. * `save_dataframe_to_file`: Только по явной просьбе пользователя "сохрани". 4.  
+**Обработка ошибок:** Если твой код вызывает ошибку, не извиняйся. Проанализируй ошибку, исправь код в следующем шаге 
+и попробуй снова. 5.  **Язык:** Всегда отвечай на том же языке, на котором задан вопрос. """
 
 
 def execute_python_code(df: pd.DataFrame, code: str) -> tuple[pd.DataFrame, str]:
-    """
-    Выполняет Python-код над переданным DataFrame.
-    Возвращает кортеж из (измененный DataFrame, строковый результат).
-    """
+    """Выполняет Python-код над DataFrame и возвращает измененный DataFrame и строковый результат."""
     print(f"TOOL: Выполнение кода:\n---\n{code}\n---")
     local_scope = {"df": df.copy(), "pd": pd}
     try:
-        # Попытка выполнить код и вернуть результат последнего выражения
         lines = code.strip().split('\n')
-        exec_lines, eval_line = lines[:-1], lines[-1]
-        if exec_lines:
-            exec("\n".join(exec_lines), {}, local_scope)
-        output = eval(eval_line, {}, local_scope)
+        if len(lines) == 1:
+            # Если одна строка, считаем ее выражением для вывода
+            output = eval(code, {"pd": pd}, local_scope)
+        else:
+            # Если несколько строк, выполняем все, кроме последней, а последнюю выводим
+            exec_lines, eval_line = lines[:-1], lines[-1]
+            exec("\n".join(exec_lines), {"pd": pd}, local_scope)
+            output = eval(eval_line, {"pd": pd}, local_scope)
 
-        # Обновляем DataFrame из локальной области видимости
         final_df = local_scope['df']
 
         if isinstance(output, pd.DataFrame):
             return final_df, output.head(15).to_markdown()
+        if isinstance(output, pd.Series):
+            return final_df, output.to_frame().head(15).to_markdown()
         return final_df, str(output)
-
     except Exception:
-        # Если eval не сработал, пробуем просто выполнить код (например, для присваивания)
         try:
-            exec(code, {}, local_scope)
+            # Если eval не сработал, пробуем просто выполнить весь код
+            exec(code, {"pd": pd}, local_scope)
             final_df = local_scope['df']
             return final_df, "Код выполнен, DataFrame обновлен."
         except Exception as exec_e:
-            # Если и это не сработало, возвращаем ошибку и исходный DataFrame
             return df, f"Ошибка выполнения кода: {exec_e}"
 
 
-def run_rag_pipeline(file_id: str, query: str) -> str:
+def run_rag_pipeline(file_id: str, query: str, lang_name: str) -> str:
+    """Ищет релевантную информацию и отвечает на вопрос с указанием языка."""
     query_embedding = get_embeddings([query])[0]
     search_results = index.query(vector=query_embedding, top_k=7, filter={"file_id": file_id}, include_metadata=True)
     context = " "
     if search_results.get('matches'):
         for match in search_results['matches']:
             context += match['metadata']['original_text'] + "\n---\n"
-    if not context:
+    if not context.strip():
         return "Не удалось найти релевантную информацию в файле."
-    rag_messages = [{"role": "system", "content": "Ответь на вопрос пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на "
-                                                  "предоставленном контексте."}, {"role": "user", "content":
-        f"Контекст:\n{context}\n\nВопрос: {query}"}]
+
+    rag_system_prompt = f"Ответь на вопрос пользователя **на {lang_name} языке**, основываясь ИСКЛЮЧИТЕЛЬНО на " \
+                        f"предоставленном контексте. "
+    rag_messages = [
+        {"role": "system", "content": rag_system_prompt},
+        {"role": "user", "content": f"Контекст:\n{context}\n\nВопрос: {query}"}
+    ]
     response = client.chat.completions.create(model=AGENT_MODEL, messages=rag_messages, temperature=0.0)
     return response.choices[0].message.content
 
@@ -403,10 +407,10 @@ def save_dataframe_to_file(db: Session, file_id: str, df_to_save: pd.DataFrame) 
         return f"Ошибка при сохранении файла в S3: {e}"
 
 
-def answer_question_from_context(file_id: str, query: str) -> str:
-    print(f"TOOL: RAG-запрос для файла {file_id}: '{query}'")
-    # run_rag_pipeline уже использует file_id для фильтрации в Pinecone
-    return run_rag_pipeline(file_id, query)
+def answer_question_from_context(file_id: str, query: str, lang_name: str) -> str:
+    """Обёртка для RAG пайплайна, передающая язык."""
+    print(f"TOOL: RAG-запрос для файла {file_id} на языке '{lang_name}': '{query}'")
+    return run_rag_pipeline(file_id, query, lang_name)
 
 
 tools_definition = [
@@ -508,16 +512,12 @@ async def upload_file(
 
     analysis = [{"column": col, "dtype": str(df[col].dtype), "nulls": int(df[col].isna().sum()),
                  "unique": int(df[col].nunique())} for col in df.columns]
-    preview_data = df.head(10).fillna("null").to_dict(orient="records")
+    preview_data = df.fillna("null").to_dict(orient="records")
     return {"columns": analysis, "preview": preview_data, "file_id": file_id, "file_name": original_filename}
 
 
 @app.post("/sessions/ask", tags=["AI Agent"])
 async def session_ask(session_id: str = Form(...), query: str = Form(...), db: Session = Depends(database.get_db)):
-    """
-    Обрабатывает запрос пользователя в рамках сессии, вызывает инструменты,
-    оценивает ответ с помощью критика и при необходимости улучшает его.
-    """
     session_data_json = redis_client.get(session_id)
     if not session_data_json:
         raise HTTPException(status_code=404, detail="Сессия не найдена или истекла.")
@@ -526,37 +526,37 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...), db: S
     file_id = session_data["file_id"]
     messages = session_data["messages"]
 
-    # 2. Загрузка DataFrame из S3
+    # --- ОПРЕДЕЛЕНИЕ ЯЗЫКА ---
+    try:
+        lang_code = detect(query)
+    except LangDetectException:
+        lang_code = 'ru'  # Язык по умолчанию, если не удалось определить
+
+    lang_name = LANG_MAP.get(lang_code, lang_code)  # Получаем название языка
+    # -------------------------
+
     df = get_df_from_s3(db, file_id)
 
-    # 3. Подготовка контекста для модели
     buf = io.StringIO()
-    df.info(buf=buf)
+    df.info(buf=buf, verbose=False)  # verbose=False для краткости
     df_info = buf.getvalue()
     df_head = df.head().to_markdown()
-    contextual_query = (
-        f"Контекст данных:\n1. Схема данных (df.info()):\n```\n{df_info}```\n"
-        f"2. Первые 5 строк (df.head()):\n```\n{df_head}```\n---\n"
-        f"Вопрос пользователя: {query}"
-    )
 
+    # Добавляем инструкцию о языке в системный промпт при каждом запросе
+    messages[0][
+        'content'] = SYSTEM_PROMPT + f"\n\nВАЖНО: Текущий язык общения - {lang_name}. Все ответы должны быть на этом " \
+                                     f"языке. "
+
+    contextual_query = f"Контекст данных:\n1. Схема данных (df.info()):\n```\n{df_info}```\n2. Первые 5 строк (" \
+                       f"df.head()):\n```\n{df_head}```\n---\nВопрос пользователя: {query} "
     messages.append({"role": "user", "content": contextual_query})
 
     try:
         final_answer = ""
-
-        # 4. Основной цикл вызова AI-агента и инструментов
         for _ in range(5):
-            response = client.chat.completions.create(
-                model=AGENT_MODEL,
-                messages=messages,
-                tools=tools_definition,
-                tool_choice="auto"
-            )
+            response = client.chat.completions.create(model=AGENT_MODEL, messages=messages, tools=tools_definition,
+                                                      tool_choice="auto")
             response_message = response.choices[0].message
-
-            # --- ИСПРАВЛЕНИЕ: Преобразуем объект в словарь ---
-            # Вместо messages.append(response_message)
             messages.append(response_message.model_dump())
 
             if not response_message.tool_calls:
@@ -567,51 +567,40 @@ async def session_ask(session_id: str = Form(...), query: str = Form(...), db: S
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
 
+                # --- Передаем язык в инструменты ---
                 if function_name == "execute_python_code":
                     df, function_response = execute_python_code(df=df, code=function_args.get("code"))
                 elif function_name == "save_dataframe_to_file":
                     function_response = save_dataframe_to_file(db=db, file_id=file_id, df_to_save=df)
                 elif function_name == "answer_question_from_context":
-                    function_response = answer_question_from_context(file_id=file_id, query=function_args.get("query"))
+                    function_response = answer_question_from_context(file_id=file_id, query=function_args.get("query"),
+                                                                     lang_name=lang_name)
                 else:
                     function_response = f"Ошибка: неизвестный инструмент {function_name}"
 
-                messages.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": function_response
-                })
+                messages.append(
+                    {"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": function_response})
 
         if not final_answer:
             last_response = client.chat.completions.create(model=AGENT_MODEL, messages=messages)
             final_answer = last_response.choices[0].message.content
             messages.append({"role": "assistant", "content": final_answer})
 
-        # 5. Вызов критика для оценки ответа
         evaluation = get_critic_evaluation(query, final_answer)
-        print(f"Critic Evaluation: {evaluation}")
-
-        # 6. Улучшение ответа
         if evaluation.get("accuracy", 5) < 4:
-            print("Ответ неудовлетворительный. Запускается модель-улучшатель...")
-            # Передаем в историю только словари, а не объекты
-            history_for_refiner = [msg for msg in messages if isinstance(msg, dict)]
             refined_answer = get_refined_answer(
-                history=history_for_refiner,
+                history=[msg for msg in messages if isinstance(msg, dict)],
                 original_answer=final_answer,
                 feedback=evaluation.get("feedback"),
-                suggestion=evaluation.get("suggestion", "")
+                suggestion=evaluation.get("suggestion", ""),
+                lang_name=lang_name  # Передаем язык и сюда
             )
             final_answer = refined_answer
             messages.append({"role": "assistant", "content": final_answer})
 
-        # 7. Обновление сессии в Redis и возврат ответа
         session_data["messages"] = messages
         redis_client.setex(session_id, timedelta(hours=2), json.dumps(session_data))
-
         return {"answer": final_answer, "evaluation": evaluation}
-
     except Exception as e:
         session_data["messages"] = messages
         redis_client.setex(session_id, timedelta(hours=2), json.dumps(session_data))
@@ -671,7 +660,7 @@ async def impute_missing_values_endpoint(file_id: str = Form(...), columns: Opti
 
     return {
         "processing_results": final_processing_results, "missing_before": final_missing_before,
-        "missing_after": final_missing_after, "preview": df_imputed.head(10).fillna("null").to_dict(orient="records"),
+        "missing_after": final_missing_after, "preview": df_imputed.fillna("null").to_dict(orient="records"),
     }
 
 
@@ -701,7 +690,7 @@ async def detect_outliers_endpoint(file_id: str = Form(...), columns: Optional[s
     predictions = model.fit_predict(numeric_df)
     outlier_indices = numeric_df.index[predictions == -1]
     outliers_df = df.loc[outlier_indices]
-    outliers_preview = outliers_df.head(5).fillna("null").to_dict('records')
+    outliers_preview = outliers_df.fillna("null").to_dict('records')
     return {"outlier_count": len(outliers_df), "outlier_preview": outliers_preview}
 
 
@@ -728,7 +717,7 @@ async def analyze_existing_file(file_id: str = Form(...), db: Session = Depends(
     df = get_df_from_s3(db, file_id)
     analysis = [{"column": col, "dtype": str(df[col].dtype), "nulls": int(df[col].isna().sum()),
                  "unique": int(df[col].nunique())} for col in df.columns]
-    preview_data = df.head(10).fillna("null").to_dict(orient="records")
+    preview_data = df.fillna("null").to_dict(orient="records")
     return {"columns": analysis, "preview": preview_data}
 
 
@@ -803,3 +792,75 @@ async def get_chart_data(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при подготовке данных для графика: {str(e)}")
+
+
+# main.py
+
+@app.post("/encode-categorical/", tags=["Data Cleaning"])
+async def encode_categorical_features(
+        file_id: str = Form(...),
+        columns: str = Form(...),  # Ожидаем JSON-строку с массивом столбцов
+        db: Session = Depends(database.get_db)
+):
+    """
+    Кодирует выбранные категориальные столбцы методом One-Hot Encoding.
+    """
+    df = get_df_from_s3(db, file_id)
+    selected_columns = json.loads(columns)
+
+    if not all(col in df.columns for col in selected_columns):
+        raise HTTPException(status_code=404, detail="Один или несколько выбранных столбцов не найдены в файле.")
+
+    # Проверяем, что в выбранных столбцах нет слишком большого кол-ва уникальных значений
+    for col in selected_columns:
+        if df[col].nunique() > 50:  # Ограничение, чтобы не создавать тысячи столбцов
+            raise HTTPException(
+                status_code=400,
+                detail=f"Столбец '{col}' имеет слишком много ({df[col].nunique()}) уникальных значений для кодирования. Максимум: 50."
+            )
+
+    try:
+        # Применяем One-Hot Encoding
+        df_encoded = pd.get_dummies(df, columns=selected_columns, prefix=selected_columns)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при кодировании: {e}")
+
+    try:
+        file_record = crud.get_file_by_uid(db, file_id)
+        with io.StringIO() as csv_buffer:
+            df_encoded.to_csv(csv_buffer, index=False)
+            s3_client.put_object(Body=csv_buffer.getvalue(), Bucket=config.S3_BUCKET_NAME, Key=file_record.s3_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save encoded file to S3: {str(e)}")
+
+    new_analysis = [{"column": col, "dtype": str(df_encoded[col].dtype), "nulls": int(df_encoded[col].isna().sum()),
+                     "unique": int(df_encoded[col].nunique())} for col in df_encoded.columns]
+    new_preview = df_encoded.fillna("null").to_dict(orient="records")
+
+    return {
+        "message": "Категориальные столбцы успешно закодированы.",
+        "columns": new_analysis,
+        "preview": new_preview
+    }
+
+
+@app.get("/preview/{file_id}", tags=["File Operations"])
+async def get_paginated_preview(
+        file_id: str,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=200),
+        db: Session = Depends(database.get_db)
+):
+    """Отдает предпросмотр файла с пагинацией."""
+    df = get_df_from_s3(db, file_id)
+
+    start_index = (page - 1) * page_size
+    end_index = start_index + page_size
+
+    # Вырезаем нужный "кусок" данных
+    paginated_preview_df = df.iloc[start_index:end_index]
+
+    return {
+        "preview": paginated_preview_df.fillna("null").to_dict(orient="records"),
+        "total_rows": len(df)  # Отдаем общее кол-во строк для расчета страниц
+    }

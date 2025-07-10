@@ -31,6 +31,8 @@ const DataCleanerPage = () => {
     const [imputationResult, setImputationResult] = useState<ImputationResult | null>(null);
     const [outliers, setOutliers] = useState<any[]>([]);
     const [outlierCount, setOutlierCount] = useState<number | null>(null);
+    const [selectedEncodingCols, setSelectedEncodingCols] = useState<string[]>([]);
+    const [isEncoding, setIsEncoding] = useState(false);
 
 
     // --- 1. ЗАГРУЗКА СПИСКА ФАЙЛОВ ПОЛЬЗОВАТЕЛЯ ---
@@ -64,17 +66,50 @@ const DataCleanerPage = () => {
         formData.append("file_id", selectedFileId);
 
         try {
-            const res = await axios.post("http://localhost:5643/analyze-existing/", formData, {
+            const res = await axios.post(`${API_URL}/analyze-existing/`, formData, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             setFileId(selectedFileId);
             setColumns(res.data.columns);
             setPreview(res.data.preview);
         } catch (err: any) {
+            // --- ИЗМЕНЕНИЕ ---
+            const message = err.response?.data?.detail || "Не удалось проанализировать выбранный файл.";
+            setError(message);
             console.error(err);
-            setError("Не удалось проанализировать выбранный файл.");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleEncode = async () => {
+        if (!fileId || selectedEncodingCols.length === 0 || !token) return;
+
+        setIsEncoding(true);
+        setError(null);
+        const formData = new FormData();
+        formData.append("file_id", fileId);
+        formData.append("columns", JSON.stringify(selectedEncodingCols));
+
+        try {
+            const res = await axios.post(`http://localhost:5643/encode-categorical/`, formData, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            // Обновляем состояние страницы новыми данными с сервера
+            setColumns(res.data.columns);
+            setPreview(res.data.preview);
+
+            // Сбрасываем выбор и результаты других операций
+            setSelectedEncodingCols([]);
+            setImputationResult(null);
+            setOutlierCount(null);
+
+            alert(res.data.message);
+        } catch (err: any) {
+            setError(err.response?.data?.detail || "Ошибка при кодировании столбцов.");
+        } finally {
+            setIsEncoding(false);
         }
     };
 
@@ -124,14 +159,14 @@ const DataCleanerPage = () => {
             // Сразу анализируем только что загруженный файл, вызвав другую нашу функцию
             await handleSelectFile(uploadRes.data.file_id, file.name);
 
-        } catch (err: any) {
+        }
+        catch (err: any) {
+            // --- ИЗМЕНЕНИЕ ---
+            const message = err.response?.data?.detail || "Не удалось загрузить файл.";
+            setError(message);
             console.error(err);
-            if (err.response && err.response.status === 401) {
-                setError("Ошибка авторизации. Ваша сессия могла истечь.");
-            } else {
-                setError("Не удалось загрузить файл.");
-            }
-            setIsLoading(false); // Важно сбросить загрузку при ошибке
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -144,13 +179,15 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedMissingCols));
         try {
-            const res = await axios.post("http://localhost:5643/impute-missing/", formData, {
+            const res = await axios.post(`${API_URL}/impute-missing/`, formData, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             setImputationResult(res.data);
-            alert('Пропуски успешно заполнены! Результаты показаны ниже.');
-        } catch (err) {
-            alert('Ошибка при заполнении пропусков.');
+            alert('Пропуски успешно заполнены!');
+        } catch (err: any) {
+            // --- ИЗМЕНЕНИЕ ---
+            const message = err.response?.data?.detail || "Ошибка при заполнении пропусков.";
+            alert(message); // Здесь можно оставить alert или использовать setError
             console.error(err);
         } finally {
             setIsImputing(false);
@@ -166,14 +203,16 @@ const DataCleanerPage = () => {
         formData.append("file_id", fileId);
         formData.append("columns", JSON.stringify(selectedOutlierCols));
         try {
-            const res = await axios.post("http://localhost:5643/outliers/", formData, {
+            const res = await axios.post(`${API_URL}/outliers/`, formData, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             setOutliers(res.data.outlier_preview);
             setOutlierCount(res.data.outlier_count);
-        } catch (err) {
+        } catch (err: any) {
+            // --- ИЗМЕНЕНИЕ ---
+            const message = err.response?.data?.detail || "Не удалось определить выбросы.";
+            setError(message);
             console.error(err);
-            setError("Не удалось определить выбросы.");
         } finally {
             setIsAnalyzing(false);
         }
@@ -420,6 +459,35 @@ const DataCleanerPage = () => {
                                 ) : <div className="p-6 text-center text-gray-600">Выбросы не найдены в выбранных столбцах.</div>}
                             </div>
                             )}
+
+                            {columns.length > 0 && columns.some(col => col.dtype === 'object') && (
+                                <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-6">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="p-2 bg-gradient-to-r from-cyan-500 to-sky-500 rounded-xl"><Zap className="w-6 h-6 text-white" /></div>
+                                        <div><h2 className="text-xl font-semibold text-gray-800">Кодирование категорий</h2><p className="text-gray-600">Преобразуйте текстовые столбцы в числовые (One-Hot)</p></div>
+                                    </div>
+                                    <div className="max-h-[250px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-cyan-400 scrollbar-track-cyan-100">
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            {columns.filter((col) => col.dtype === 'object').map((col) => (
+                                            <label key={col.column} className="relative">
+                                                <input type="checkbox" value={col.column} checked={selectedEncodingCols.includes(col.column)}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        setSelectedEncodingCols((prev) => prev.includes(val) ? prev.filter((c) => c !== val) : [...prev, val]);
+                                                    }} className="sr-only" />
+                                                <div className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedEncodingCols.includes(col.column) ? "border-cyan-500 bg-cyan-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
+                                                    <div className="font-medium text-gray-900">{col.column}</div>
+                                                    <div className="text-sm text-gray-500">{col.unique} уникальных</div>
+                                                </div>
+                                            </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <button onClick={handleEncode} disabled={isEncoding || selectedEncodingCols.length === 0} className="mt-6 flex items-center gap-2 px-6 py-3 bg-cyan-600 text-white rounded-xl disabled:bg-gray-400 transition-colors">
+                                        {isEncoding ? <><Loader className="w-5 h-5 animate-spin" /><span>Кодирование...</span></> : "Закодировать"}
+                                    </button>
+                                </div>
+                                )}
 
                             {/* Data Preview Section */}
                             {preview.length > 0 && (

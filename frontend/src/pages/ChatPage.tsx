@@ -46,9 +46,10 @@ const ChatPage = () => {
           setChatHistory([{ role: 'assistant', content: `Сессия для файла успешно начата. Я готов к анализу. Что бы вы хотели узнать?` }]);
         })
         .catch(err => {
+            const message = err.response?.data?.detail || "Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и выбрать файл заново.";
+            setError(message);
             console.error("Ошибка старта сессии", err);
-            setError("Не удалось запустить сессию. Пожалуйста, попробуйте вернуться на главную страницу и выбрать файл заново.");
-            setSessionId(null); // Сбрасываем ID сессии при ошибке
+            setSessionId(null);
             setActiveSessionFileId(null);
         })
         .finally(() => setIsSessionLoading(false));
@@ -77,9 +78,10 @@ const ChatPage = () => {
           headers: { 'Authorization': `Bearer ${token}` }
       });
       setChatHistory(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
-    } catch (err) {
-      console.error(err);
-      setChatHistory(prev => [...prev, { role: 'assistant', content: "Произошла ошибка при обработке вашего запроса." }]);
+    } catch (err: any) {
+        const message = err.response?.data?.detail || "Произошла ошибка при обработке вашего запроса.";
+        setError(message);
+        console.error(err);
     } finally {
       setIsReplying(false);
     }
